@@ -449,7 +449,9 @@ function reverseConvert(f03Text, f01Text){
     assign.set(svc,{first:String(f3rows[r][c3f]||'').trim(), last:String(f3rows[r][c3l]||'').trim()});
   }
 
-  const out=[f1[0]]; // exact file01 header
+  // Sage import format: every field quoted, values trimmed, dates MM/DD/YY, LF line endings.
+  const isDateCol = ci => f1cols[ci]==='Received Date' || f1cols[ci]==='Schedule_Date';
+  const outRows=[ f1cols.slice() ];  // header (trimmed column names)
   const st={kept:0, out2if:0, feKept:0, fvKept:0, dropCFF:0, dropUnassigned:0};
   const missingCode=new Map();   // "First Last" -> count (crew found, no code)
   const unknownCrew=new Map();   // "First Last" -> count (not in library)
@@ -464,15 +466,29 @@ function reverseConvert(f03Text, f01Text){
     const who=`${a.first} ${a.last}`.trim();
     if(!crew) unknownCrew.set(who,(unknownCrew.get(who)||0)+1);
     else if(!crew.code) missingCode.set(who,(missingCode.get(who)||0)+1);
-    if(crew && crew.code) cells[iSid]=padCell(crew.code, cells[iSid]); // else leave original Servicer Id
+    const newSid = (crew && crew.code) ? crew.code : String(cells[iSid]||'').trim(); // keep original if no code
     const newStatus = status==='OUT' ? 'IF' : status; // FE/FV unchanged
-    cells[iStat]=padCell(newStatus, cells[iStat]);
-    out.push(cells.join(','));
+    const rec = f1cols.map((_,ci)=>{
+      let v = String(cells[ci]==null?'':cells[ci]).trim();
+      if(ci===iSid) v=newSid;
+      else if(ci===iStat) v=newStatus;
+      else if(isDateCol(ci)) v=toMMDDYY(v);
+      return v;
+    });
+    outRows.push(rec);
     st.kept++;
     if(status==='OUT') st.out2if++; else if(status==='FE') st.feKept++; else if(status==='FV') st.fvKept++;
   }
-  const text=out.join(nl)+nl;
+  const q = s => '"'+String(s==null?'':s).replace(/"/g,'""')+'"';
+  const text = outRows.map(r=>r.map(q).join(',')).join('\n')+'\n';
   return {text, outName:`Sage Import ${todayStamp()}.csv`, st, missingCode, unknownCrew};
+}
+function toMMDDYY(s){
+  s=String(s==null?'':s).trim();
+  const m=s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+  if(!m) return s; // not a M/D/Y date -> leave as-is
+  const yy=m[3].length===4 ? m[3].slice(2) : m[3].padStart(2,'0');
+  return `${m[1].padStart(2,'0')}/${m[2].padStart(2,'0')}/${yy}`;
 }
 
 function runReverse(){
