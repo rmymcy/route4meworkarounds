@@ -426,11 +426,10 @@ function crewByName(first,last){
 
 function reverseConvert(f03Text, f01Text){
   if(!f01Text) throw new Error('Load the original Sage export (file01) first.');
-  const nl = f01Text.indexOf('\r\n')>=0 ? '\r\n' : '\n';
-  const f1 = f01Text.split(/\r?\n/).filter(l=>l.trim()!=='');
+  const f1 = parseCSV(f01Text).filter(r=>r.some(c=>String(c).trim()!==''));  // handles quoted or padded
   if(f1.length<2) throw new Error('file01 looks empty.');
-  const f1cols = f1[0].split(',').map(s=>s.trim());
-  const ix = n=>f1cols.indexOf(n);
+  const f1cols = f1[0].map(s=>String(s).trim());
+  const ix = n=>f1cols.findIndex(c=>norm(c)===norm(n));
   const iSvc=ix('Svc Job Num'), iSid=ix('Servicer Id'), iStat=ix('Status Code');
   if(iSvc<0||iSid<0||iStat<0) throw new Error('file01 is missing Svc Job Num / Servicer Id / Status Code columns.');
 
@@ -450,13 +449,13 @@ function reverseConvert(f03Text, f01Text){
   }
 
   // Sage import format: every field quoted, values trimmed, dates MM/DD/YY, LF line endings.
-  const isDateCol = ci => f1cols[ci]==='Received Date' || f1cols[ci]==='Schedule_Date';
+  const isDateCol = ci => norm(f1cols[ci])==='received date' || norm(f1cols[ci])==='schedule_date';
   const outRows=[ f1cols.slice() ];  // header (trimmed column names)
   const st={kept:0, out2if:0, feKept:0, fvKept:0, dropCFF:0, dropUnassigned:0};
   const missingCode=new Map();   // "First Last" -> count (crew found, no code)
   const unknownCrew=new Map();   // "First Last" -> count (not in library)
   for(let li=1;li<f1.length;li++){
-    const cells=f1[li].split(',');
+    const cells=f1[li];
     const status=String(cells[iStat]||'').trim();
     const svc=String(cells[iSvc]||'').trim();
     if(status==='CFF'){ st.dropCFF++; continue; }
