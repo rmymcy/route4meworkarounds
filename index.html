@@ -53,6 +53,12 @@
   .badge.ok{background:#ecfdf3;color:var(--ok)}
   .badge.warn{background:var(--warn-bg);color:var(--warn)}
   .badge.err{background:var(--err-bg);color:var(--err)}
+  .switch{position:relative;display:inline-block;width:38px;height:22px;cursor:pointer}
+  .switch input{opacity:0;width:0;height:0;position:absolute}
+  .switch .track{position:absolute;inset:0;background:#cbd5e1;border-radius:999px;transition:.15s}
+  .switch .track:before{content:"";position:absolute;height:16px;width:16px;left:3px;top:3px;background:#fff;border-radius:50%;transition:.15s}
+  .switch input:checked+.track{background:var(--ok)}
+  .switch input:checked+.track:before{transform:translateX(16px)}
   .stat{display:flex;gap:22px;flex-wrap:wrap;margin:4px 0 0}
   .stat div{font-size:12px;color:var(--muted)}
   .stat b{display:block;font-size:22px;color:var(--ink);font-weight:700;line-height:1.1}
@@ -157,7 +163,7 @@
       </div>
       <div class="tablewrap">
         <table>
-          <thead><tr><th>Crew</th><th>Depot label</th><th style="width:180px">Lat / Long</th><th style="width:90px"></th></tr></thead>
+          <thead><tr><th style="width:52px">On</th><th>Crew</th><th>Depot label</th><th style="width:180px">Lat / Long</th><th style="width:90px"></th></tr></thead>
           <tbody id="crewBody"></tbody>
         </table>
       </div>
@@ -291,8 +297,9 @@ function convert(text, sourceName){
     }
     out.push(reshape(cells, lat, lng, ''));
   }
-  // depot rows
-  for(const cw of CREWS){
+  // depot rows (active crews only)
+  const activeCrews=CREWS.filter(isActive);
+  for(const cw of activeCrews){
     const cells=new Array(header.length).fill('');
     cells[iAddr]=(cw.name||'')+' Home';
     // reshape will place lat/lng after address; put coords via reshape args, and mark depot=1
@@ -300,8 +307,9 @@ function convert(text, sourceName){
   }
 
   const outName=(sourceName||'export').replace(/\.csv$/i,'')+'_geocoded.csv';
-  return {rows:out, outName, unmatched, matched, jobs, depots:CREWS.length};
+  return {rows:out, outName, unmatched, matched, jobs, depots:activeCrews.length};
 }
+function isActive(cw){ return cw.active!==false; } // default on unless explicitly false
 function fmtCoord(v){
   if(v==null||v==='') return '';
   const n=Number(v);
@@ -325,7 +333,7 @@ function renderResult(res){
     <div><b>${res.jobs}</b>job rows</div>
     <div><b>${res.matched}</b>geocoded</div>
     <div><b>${res.unmatched.size}</b>unmatched</div>
-    <div><b>${res.depots}</b>depot rows</div>`;
+    <div><b>${res.depots}</b>active depots</div>`;
   const warn=document.getElementById('warnBox');
   if(res.unmatched.size){
     const names=[...res.unmatched.keys()].map(k=>`<span class="chip">${esc(k||'(blank)')}</span>`).join('');
@@ -436,14 +444,18 @@ function renderCrews(){
   const q=norm(document.getElementById('crewSearch').value);
   const body=document.getElementById('crewBody');
   const list=CREWS.map((c,i)=>({c,i})).filter(({c})=>!q||norm(c.name).includes(q));
-  body.innerHTML=list.map(({c,i})=>`
-    <tr>
-      <td><b>${esc(c.name)}</b></td>
+  body.innerHTML=list.map(({c,i})=>{
+    const on=isActive(c);
+    return `
+    <tr style="${on?'':'opacity:.5'}">
+      <td><label class="switch"><input type="checkbox" data-togglecrew="${i}" ${on?'checked':''}><span class="track"></span></label></td>
+      <td><b>${esc(c.name)}</b> ${on?'<span class="badge ok">Working</span>':'<span class="badge warn">Day off</span>'}</td>
       <td class="muted">${esc(c.name)} Home</td>
       <td class="pin">${fmtCoord(c.lat)}, ${fmtCoord(c.lng)}</td>
       <td><button class="small" data-editcrew="${i}">Edit</button> <button class="small danger" data-delcrew="${i}">Del</button></td>
-    </tr>`).join('');
-  document.getElementById('crewCount').textContent=`${CREWS.length} crews${q?` (${list.length} shown)`:''}`;
+    </tr>`;}).join('');
+  const activeN=CREWS.filter(isActive).length;
+  document.getElementById('crewCount').textContent=`${activeN} of ${CREWS.length} crews working${q?` (${list.length} shown)`:''}`;
 }
 
 /* ============================ EDIT MODALS ============================ */
@@ -500,7 +512,7 @@ function editCrewModal(i){
     const lng=document.getElementById('c_lng').value.trim();
     if(!name){ showToast('Crew name required'); return; }
     if(lat===''||lng===''||!isFinite(+lat)||!isFinite(+lng)){ showToast('Valid lat & long required'); return; }
-    const rec={name,lat:+lat,lng:+lng};
+    const rec={name,lat:+lat,lng:+lng,active:isNew?true:isActive(CREWS[i])};
     if(isNew) CREWS.push(rec); else CREWS[i]=rec;
     persistCrews(); root.innerHTML=''; renderCrews(); showToast('Saved');
   };
@@ -555,8 +567,12 @@ document.getElementById('crewSearch').oninput=renderCrews;
 document.getElementById('addCrewBtn').onclick=()=>editCrewModal(-1);
 document.getElementById('exportCrews').onclick=()=>download('crews.json',JSON.stringify(CREWS,null,2));
 document.getElementById('importCrewsBtn').onclick=()=>document.getElementById('importCrews').click();
-document.getElementById('importCrews').onchange=e=>{ const f=e.target.files[0]; if(!f)return; const rd=new FileReader(); rd.onload=()=>{ try{const d=JSON.parse(rd.result); if(!Array.isArray(d))throw 0; CREWS=d.map(x=>({name:x.name||'',lat:x.lat,lng:x.lng})); persistCrews(); renderCrews(); showToast('Imported '+CREWS.length+' crews'); }catch(err){ showToast('Invalid JSON'); } }; rd.readAsText(f); e.target.value=''; };
+document.getElementById('importCrews').onchange=e=>{ const f=e.target.files[0]; if(!f)return; const rd=new FileReader(); rd.onload=()=>{ try{const d=JSON.parse(rd.result); if(!Array.isArray(d))throw 0; CREWS=d.map(x=>({name:x.name||'',lat:x.lat,lng:x.lng,active:x.active!==false})); persistCrews(); renderCrews(); showToast('Imported '+CREWS.length+' crews'); }catch(err){ showToast('Invalid JSON'); } }; rd.readAsText(f); e.target.value=''; };
 document.getElementById('resetCrews').onclick=()=>{ if(confirm('Reset the crew library to the original seed?')){ CREWS=JSON.parse(JSON.stringify(CREWS_SEED)); persistCrews(); renderCrews(); showToast('Reset'); } };
+document.getElementById('crewBody').addEventListener('change',e=>{
+  const t=e.target;
+  if(t.dataset.togglecrew!=null){ const i=+t.dataset.togglecrew; CREWS[i].active=t.checked; persistCrews(); renderCrews(); }
+});
 document.getElementById('crewBody').addEventListener('click',e=>{
   const t=e.target;
   if(t.dataset.editcrew!=null) return editCrewModal(+t.dataset.editcrew);
