@@ -306,10 +306,11 @@ function convert(text, sourceName){
     out.push(reshape(cells, fmtCoord(cw.lat), fmtCoord(cw.lng), '1'));
   }
 
-  const outName=(sourceName||'export').replace(/\.csv$/i,'')+'_geocoded.csv';
+  const outName=`Route4Me Upload ${todayStamp()}.csv`;
   return {rows:out, outName, unmatched, matched, jobs, depots:activeCrews.length};
 }
 function isActive(cw){ return cw.active!==false; } // default on unless explicitly false
+function todayStamp(){ const d=new Date(); const p=n=>String(n).padStart(2,'0'); return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`; }
 function fmtCoord(v){
   if(v==null||v==='') return '';
   const n=Number(v);
