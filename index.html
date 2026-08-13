@@ -723,10 +723,10 @@ file3In.onchange=e=>{ const f=e.target.files[0]; if(f) read3(f); };
 drop3.addEventListener('drop',e=>{ const f=e.dataTransfer.files[0]; if(f) read3(f); });
 function read3(f){
   document.getElementById('file3Name').textContent=f.name;
-  const rd=new FileReader(); rd.onload=()=>{ file3Text=rd.result; runReverse(); }; rd.readAsText(f);
+  const rd=new FileReader(); rd.onload=()=>{ file03Text=rd.result; runReverse(); }; rd.readAsText(f);
 }
 document.getElementById('f1pickBtn').onclick=()=>document.getElementById('f1file').click();
-document.getElementById('f1file').onchange=e=>{ const f=e.target.files[0]; if(!f)return; const rd=new FileReader(); rd.onload=()=>{ setFile01(rd.result,f.name,false); if(file3Text) runReverse(); }; rd.readAsText(f); };
+document.getElementById('f1file').onchange=e=>{ const f=e.target.files[0]; if(!f)return; const rd=new FileReader(); rd.onload=()=>{ setFile01(rd.result,f.name,false); if(file03Text) runReverse(); }; rd.readAsText(f); };
 document.getElementById('download4Btn').onclick=download4;
 document.getElementById('downloadBtn').onclick=downloadResult;
 document.getElementById('reviewUnmatchedBtn').onclick=()=>{ if(lastResult&&lastResult.unmatched.size){ const li=load(K_LASTIMPORT,null); if(li) openUnmatchedModal(lastResult.unmatched,()=>runConvert(li.text,li.name)); } };
