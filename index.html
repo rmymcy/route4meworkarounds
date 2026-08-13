@@ -262,24 +262,30 @@ function convert(text, sourceName){
   if(iAddr<0) throw new Error('Could not find an "Address 1" column in this file.');
   if(iSub<0) throw new Error('Could not find a "Subdiv Name" column in this file.');
 
-  // Already converted? (has Latitude col) -> we rebuild from scratch anyway using original layout.
-  const alreadyHasLat=findCol(header,LAT_H)>=0;
-
   const idx=buildIndex();
   const out=[];
-  // Build new header: insert Lat/Lng after Address, drop any pre-existing Lat/Lng/Depot, append Depot.
+
+  // ---- Output column plan ----
+  // Front-load the columns you map in Route4Me, in this order:
+  //   Address 1, Latitude, Longitude, Priority, Schedule_Date, Depot
+  // then every remaining original column in its original order (nothing dropped).
+  const iPrio=findCol(header,'Priority');
+  const iSched=findCol(header,'Schedule_Date');
   const skip=new Set([findCol(header,LAT_H),findCol(header,LNG_H),findCol(header,DEPOT_H)].filter(x=>x>=0));
+  const plan=[], placed=new Set();
+  const addOrig=i=>{ if(i>=0 && !placed.has(i) && !skip.has(i)){ plan.push({k:'orig',i}); placed.add(i); } };
+  addOrig(iAddr);
+  plan.push({k:'lat'});
+  plan.push({k:'lng'});
+  addOrig(iPrio);
+  addOrig(iSched);
+  plan.push({k:'depot'});
+  for(let c=0;c<header.length;c++) addOrig(c); // the rest, in original order
   function reshape(cells, latVal, lngVal, depotVal){
-    const o=[];
-    for(let c=0;c<header.length;c++){
-      if(skip.has(c)) continue;
-      o.push(cells[c]==null?'':cells[c]);
-      if(c===iAddr){ o.push(latVal); o.push(lngVal); }
-    }
-    o.push(depotVal);
-    return o;
+    return plan.map(s=> s.k==='orig' ? (cells[s.i]==null?'':cells[s.i])
+      : s.k==='lat' ? latVal : s.k==='lng' ? lngVal : depotVal);
   }
-  out.push(reshape(header, LAT_H, LNG_H, DEPOT_H));
+  out.push(reshape(header, LAT_H, LNG_H, DEPOT_H)); // header row (orig specs yield padded header names)
 
   const unmatched=new Map(); // erpName -> {count, sampleRowIdx}
   let matched=0, jobs=0;
