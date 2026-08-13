@@ -89,10 +89,11 @@
 <header>
   <div>
     <h1>Route4Me Workaround</h1>
-    <div class="sub">ERP export &rarr; Route4Me upload &middot; local &amp; offline</div>
+    <div class="sub">Sage &harr; Route4Me &middot; local &amp; offline</div>
   </div>
   <nav class="tabs">
-    <div class="tab active" data-tab="convert">Convert</div>
+    <div class="tab active" data-tab="convert">Send to Route4Me</div>
+    <div class="tab" data-tab="bring">Bring back to Sage</div>
     <div class="tab" data-tab="subs">Subdivisions</div>
     <div class="tab" data-tab="crews">Crews / Depots</div>
   </nav>
@@ -121,6 +122,40 @@
         <button class="primary" id="downloadBtn">Download Route4Me CSV</button>
         <button id="reviewUnmatchedBtn" class="hide">Fix unmatched subs</button>
         <span class="muted" id="outName"></span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= BRING BACK (file03 -> file04) ================= -->
+  <section id="tab-bring" class="hide">
+    <div class="card">
+      <h2>1. Drop the Route4Me export (file03)</h2>
+      <p class="help">The routed export with crew names (<b>User_First_Name</b> / <b>User_Last_Name</b>). The tool matches each job back to your
+        original Sage export by <b>Svc&nbsp;Job&nbsp;Num</b>, drops blank &amp; unassigned rows, sets <b>Servicer&nbsp;Id</b> to the crew&rsquo;s code, and
+        remaps <b>Status</b> &mdash; producing a file in Sage&rsquo;s exact format.</p>
+
+      <label class="fld">Original Sage export (file01)</label>
+      <div id="f1box" class="note" style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:14px">
+        <span id="f1status">No file01 loaded yet.</span>
+        <span><button class="small" id="f1pickBtn">Use a different file01&hellip;</button>
+        <input type="file" id="f1file" accept=".csv,text/csv" class="hide"></span>
+      </div>
+
+      <div id="drop3" class="drop">
+        <p style="margin:0 0 8px"><b>Drag &amp; drop</b> the Route4Me export (file03) here, or</p>
+        <button class="primary" id="pick3Btn">Choose file&hellip;</button>
+        <input type="file" id="file3" accept=".csv,text/csv" class="hide">
+        <p id="file3Name" class="muted" style="margin:12px 0 0"></p>
+      </div>
+    </div>
+
+    <div class="card hide" id="result4Card">
+      <h2>2. Review</h2>
+      <div class="stat" id="stats4"></div>
+      <div style="margin:16px 0" id="warn4Box"></div>
+      <div class="row">
+        <button class="primary" id="download4Btn">Download Sage import (file04)</button>
+        <span class="muted" id="out4Name"></span>
       </div>
     </div>
   </section>
@@ -374,6 +409,111 @@ function downloadResult(){
   setTimeout(()=>URL.revokeObjectURL(a.href),2000);
 }
 
+/* ============================ BRING BACK (file03 -> file04) ============================ */
+let file01Text=null, file01Name=null, file03Text=null, lastFile04=null;
+
+function padCell(newVal, origCell){
+  const s=String(newVal==null?'':newVal);
+  const w=String(origCell==null?'':origCell).length;
+  return s.length<w ? s+' '.repeat(w-s.length) : s; // left-aligned, right-padded to original width
+}
+function crewByName(first,last){
+  const nf=norm(first), nl=norm(last);
+  let c=CREWS.find(x=>norm(x.name)===nf && norm(x.last||'')===nl);
+  if(!c) c=CREWS.find(x=>norm(x.name)===nf); // fallback on first name
+  return c||null;
+}
+
+function reverseConvert(f03Text, f01Text){
+  if(!f01Text) throw new Error('Load the original Sage export (file01) first.');
+  const nl = f01Text.indexOf('\r\n')>=0 ? '\r\n' : '\n';
+  const f1 = f01Text.split(/\r?\n/).filter(l=>l.trim()!=='');
+  if(f1.length<2) throw new Error('file01 looks empty.');
+  const f1cols = f1[0].split(',').map(s=>s.trim());
+  const ix = n=>f1cols.indexOf(n);
+  const iSvc=ix('Svc Job Num'), iSid=ix('Servicer Id'), iStat=ix('Status Code');
+  if(iSvc<0||iSid<0||iStat<0) throw new Error('file01 is missing Svc Job Num / Servicer Id / Status Code columns.');
+
+  // file03 -> assignment map by Svc Job Num
+  const f3rows=parseCSV(f03Text).filter(r=>r.some(c=>String(c).trim()!==''));
+  if(!f3rows.length) throw new Error('file03 is empty.');
+  const f3h=f3rows[0].map(s=>norm(s));
+  const j3=(...names)=>{ for(const n of names){ const k=f3h.indexOf(norm(n)); if(k>=0) return k; } return -1; };
+  const c3svc=j3('Svc Job Num'), c3f=j3('User_First_Name','User First Name'), c3l=j3('User_Last_Name','User Last Name');
+  if(c3svc<0) throw new Error('file03 has no "Svc Job Num" column.');
+  if(c3f<0||c3l<0) throw new Error('file03 has no User_First_Name / User_Last_Name columns.');
+  const assign=new Map();
+  for(let r=1;r<f3rows.length;r++){
+    const svc=String(f3rows[r][c3svc]||'').trim();
+    if(!svc) continue; // blank / depot / break row
+    assign.set(svc,{first:String(f3rows[r][c3f]||'').trim(), last:String(f3rows[r][c3l]||'').trim()});
+  }
+
+  const out=[f1[0]]; // exact file01 header
+  const st={kept:0, out2if:0, feKept:0, fvKept:0, dropCFF:0, dropUnassigned:0};
+  const missingCode=new Map();   // "First Last" -> count (crew found, no code)
+  const unknownCrew=new Map();   // "First Last" -> count (not in library)
+  for(let li=1;li<f1.length;li++){
+    const cells=f1[li].split(',');
+    const status=String(cells[iStat]||'').trim();
+    const svc=String(cells[iSvc]||'').trim();
+    if(status==='CFF'){ st.dropCFF++; continue; }
+    if(!assign.has(svc)){ st.dropUnassigned++; continue; }
+    const a=assign.get(svc);
+    const crew=crewByName(a.first,a.last);
+    const who=`${a.first} ${a.last}`.trim();
+    if(!crew) unknownCrew.set(who,(unknownCrew.get(who)||0)+1);
+    else if(!crew.code) missingCode.set(who,(missingCode.get(who)||0)+1);
+    if(crew && crew.code) cells[iSid]=padCell(crew.code, cells[iSid]); // else leave original Servicer Id
+    const newStatus = status==='OUT' ? 'IF' : status; // FE/FV unchanged
+    cells[iStat]=padCell(newStatus, cells[iStat]);
+    out.push(cells.join(','));
+    st.kept++;
+    if(status==='OUT') st.out2if++; else if(status==='FE') st.feKept++; else if(status==='FV') st.fvKept++;
+  }
+  const text=out.join(nl)+nl;
+  return {text, outName:`Sage Import ${todayStamp()}.csv`, st, missingCode, unknownCrew};
+}
+
+function runReverse(){
+  if(!file03Text){ showToast('Drop the Route4Me export (file03) first'); return; }
+  let res;
+  try{ res=reverseConvert(file03Text, file01Text); }
+  catch(e){ showToast(e.message); return; }
+  lastFile04=res;
+  document.getElementById('result4Card').classList.remove('hide');
+  const s=res.st;
+  document.getElementById('stats4').innerHTML=`
+    <div><b>${s.kept}</b>rows in file04</div>
+    <div><b>${s.out2if}</b>OUT &rarr; IF</div>
+    <div><b>${s.feKept+s.fvKept}</b>FE/FV kept</div>
+    <div><b>${s.dropCFF}</b>CFF dropped</div>
+    <div><b>${s.dropUnassigned}</b>unassigned dropped</div>`;
+  const probs=[];
+  if(res.unknownCrew.size) probs.push(`<div class="unmatched"><span class="badge err">Unknown crew</span>
+    <div style="margin-top:6px">These drivers from file03 aren&rsquo;t in your Crews library, so Servicer Id was left unchanged:</div>
+    <div style="margin-top:6px">${[...res.unknownCrew].map(([k,n])=>`<span class="chip">${esc(k)} &times;${n}</span>`).join('')}</div></div>`);
+  if(res.missingCode.size) probs.push(`<div class="unmatched"><span class="badge warn">Missing Servicer Id code</span>
+    <div style="margin-top:6px">These crews have no code set (Crews tab), so Servicer Id was left unchanged:</div>
+    <div style="margin-top:6px">${[...res.missingCode].map(([k,n])=>`<span class="chip">${esc(k)} &times;${n}</span>`).join('')}</div></div>`);
+  document.getElementById('warn4Box').innerHTML = probs.length ? probs.join('')
+    : `<div class="note">Every kept job got a crew Servicer Id. Ready to import into Sage.</div>`;
+  document.getElementById('out4Name').textContent='will save as: '+res.outName;
+}
+function download4(){
+  if(!lastFile04) return;
+  const blob=new Blob([lastFile04.text],{type:'text/csv'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob); a.download=lastFile04.outName;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(a.href),2000);
+}
+function setFile01(text,name,fromStash){
+  file01Text=text; file01Name=name;
+  const rows=(text.split(/\r?\n/).filter(l=>l.trim()!=='').length-1);
+  document.getElementById('f1status').innerHTML = `<b>file01:</b> ${esc(name)} &middot; ${rows} job rows${fromStash?' <span class="muted">(from your last Send)</span>':''}`;
+}
+
 /* ============================ UNMATCHED MODAL ============================ */
 function openUnmatchedModal(unmatched, onResolvedRerun){
   const items=[...unmatched.entries()];
@@ -554,9 +694,9 @@ function download(name,text,type){ const b=new Blob([text],{type:type||'applicat
 document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{
   document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
   t.classList.add('active');
-  ['convert','subs','crews'].forEach(id=>document.getElementById('tab-'+id).classList.toggle('hide',id!==t.dataset.tab));
+  ['convert','bring','subs','crews'].forEach(id=>document.getElementById('tab-'+id).classList.toggle('hide',id!==t.dataset.tab));
 });
-// file / drop
+// file / drop (file01 -> file02)
 const drop=document.getElementById('drop'), fileInput=document.getElementById('file');
 document.getElementById('pickBtn').onclick=()=>fileInput.click();
 fileInput.onchange=e=>{ const f=e.target.files[0]; if(f) readFile(f); };
@@ -569,6 +709,25 @@ function readFile(f){
   rd.onload=()=>runConvert(rd.result,f.name);
   rd.readAsText(f);
 }
+
+// Bring back (file03 -> file04)
+(function(){
+  const stash=load(K_LASTIMPORT,null);
+  if(stash && stash.text) setFile01(stash.text, stash.name||'file01.csv', true);
+})();
+const drop3=document.getElementById('drop3'), file3In=document.getElementById('file3');
+document.getElementById('pick3Btn').onclick=()=>file3In.click();
+file3In.onchange=e=>{ const f=e.target.files[0]; if(f) read3(f); };
+;['dragenter','dragover'].forEach(ev=>drop3.addEventListener(ev,e=>{e.preventDefault();drop3.classList.add('drag');}));
+;['dragleave','drop'].forEach(ev=>drop3.addEventListener(ev,e=>{e.preventDefault();drop3.classList.remove('drag');}));
+drop3.addEventListener('drop',e=>{ const f=e.dataTransfer.files[0]; if(f) read3(f); });
+function read3(f){
+  document.getElementById('file3Name').textContent=f.name;
+  const rd=new FileReader(); rd.onload=()=>{ file3Text=rd.result; runReverse(); }; rd.readAsText(f);
+}
+document.getElementById('f1pickBtn').onclick=()=>document.getElementById('f1file').click();
+document.getElementById('f1file').onchange=e=>{ const f=e.target.files[0]; if(!f)return; const rd=new FileReader(); rd.onload=()=>{ setFile01(rd.result,f.name,false); if(file3Text) runReverse(); }; rd.readAsText(f); };
+document.getElementById('download4Btn').onclick=download4;
 document.getElementById('downloadBtn').onclick=downloadResult;
 document.getElementById('reviewUnmatchedBtn').onclick=()=>{ if(lastResult&&lastResult.unmatched.size){ const li=load(K_LASTIMPORT,null); if(li) openUnmatchedModal(lastResult.unmatched,()=>runConvert(li.text,li.name)); } };
 
