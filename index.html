@@ -1,0 +1,570 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Route4Me Workaround</title>
+<style>
+  :root{
+    --bg:#f4f6f9; --panel:#ffffff; --ink:#1f2733; --muted:#6b7683;
+    --line:#e2e7ee; --brand:#2563eb; --brand-d:#1d4ed8; --ok:#16a34a;
+    --warn:#d97706; --warn-bg:#fff7ed; --err:#dc2626; --err-bg:#fef2f2;
+    --chip:#eef2f7; --shadow:0 1px 3px rgba(16,24,40,.08),0 1px 2px rgba(16,24,40,.04);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font:14px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    background:var(--bg);color:var(--ink)}
+  header{background:var(--panel);border-bottom:1px solid var(--line);padding:14px 20px;
+    display:flex;align-items:center;gap:14px;position:sticky;top:0;z-index:20}
+  header h1{font-size:16px;margin:0;font-weight:700;letter-spacing:.2px}
+  header .sub{color:var(--muted);font-size:12px}
+  .tabs{display:flex;gap:4px;margin-left:auto}
+  .tab{padding:7px 14px;border-radius:8px;cursor:pointer;color:var(--muted);font-weight:600;font-size:13px;border:1px solid transparent}
+  .tab.active{background:var(--chip);color:var(--ink)}
+  main{max-width:1080px;margin:0 auto;padding:22px 20px 80px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow);padding:20px;margin-bottom:18px}
+  .card h2{margin:0 0 4px;font-size:15px}
+  .card p.help{margin:0 0 16px;color:var(--muted);font-size:13px}
+  button{font:inherit;cursor:pointer;border-radius:8px;border:1px solid var(--line);background:#fff;padding:8px 14px;font-weight:600;color:var(--ink)}
+  button:hover{background:#f8fafc}
+  button.primary{background:var(--brand);border-color:var(--brand);color:#fff}
+  button.primary:hover{background:var(--brand-d)}
+  button.primary:disabled{background:#9db6ef;border-color:#9db6ef;cursor:not-allowed}
+  button.danger{color:var(--err);border-color:#f3c9c9}
+  button.danger:hover{background:var(--err-bg)}
+  button.small{padding:5px 10px;font-size:12px}
+  .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  .drop{border:2px dashed var(--line);border-radius:12px;padding:34px;text-align:center;color:var(--muted);transition:.15s;background:#fbfcfe}
+  .drop.drag{border-color:var(--brand);background:#eff4ff;color:var(--brand)}
+  .drop b{color:var(--ink)}
+  input[type=text],input[type=number],input[type=search]{font:inherit;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:#fff;color:var(--ink);width:100%}
+  input:focus{outline:2px solid #bfd3ff;border-color:var(--brand)}
+  label.fld{display:block;font-size:12px;font-weight:600;color:var(--muted);margin:0 0 4px}
+  table{border-collapse:collapse;width:100%;font-size:13px}
+  th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{font-size:11px;text-transform:uppercase;letter-spacing:.4px;color:var(--muted);position:sticky;top:0;background:var(--panel);z-index:1}
+  tr:hover td{background:#fafbfd}
+  .tablewrap{max-height:460px;overflow:auto;border:1px solid var(--line);border-radius:10px}
+  .chip{display:inline-block;background:var(--chip);border-radius:999px;padding:2px 9px;font-size:11px;margin:2px 3px 2px 0;color:#475467}
+  .chip .x{cursor:pointer;color:#98a2b3;margin-left:4px;font-weight:700}
+  .chip .x:hover{color:var(--err)}
+  .pin{color:var(--muted);font-variant-numeric:tabular-nums;font-size:12px}
+  .badge{font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px}
+  .badge.ok{background:#ecfdf3;color:var(--ok)}
+  .badge.warn{background:var(--warn-bg);color:var(--warn)}
+  .badge.err{background:var(--err-bg);color:var(--err)}
+  .stat{display:flex;gap:22px;flex-wrap:wrap;margin:4px 0 0}
+  .stat div{font-size:12px;color:var(--muted)}
+  .stat b{display:block;font-size:22px;color:var(--ink);font-weight:700;line-height:1.1}
+  .toolbar{display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap}
+  .toolbar .grow{flex:1;min-width:180px}
+  .muted{color:var(--muted)}
+  .hide{display:none}
+  /* modal */
+  .backdrop{position:fixed;inset:0;background:rgba(16,24,40,.45);display:flex;align-items:center;justify-content:center;z-index:50;padding:20px}
+  .modal{background:var(--panel);border-radius:14px;max-width:640px;width:100%;max-height:86vh;overflow:auto;box-shadow:0 20px 40px rgba(16,24,40,.25)}
+  .modal .mh{padding:18px 22px;border-bottom:1px solid var(--line)}
+  .modal .mh h3{margin:0;font-size:16px}
+  .modal .mb{padding:18px 22px}
+  .modal .mf{padding:14px 22px;border-top:1px solid var(--line);display:flex;gap:10px;justify-content:flex-end;position:sticky;bottom:0;background:var(--panel)}
+  .unmatched{border:1px solid var(--warn-bg);border-left:3px solid var(--warn);border-radius:8px;padding:12px;margin-bottom:10px;background:#fffdf8}
+  .unmatched .nm{font-weight:700;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px}
+  .unmatched .cnt{color:var(--muted);font-size:12px}
+  .grid3{display:grid;grid-template-columns:1fr 1fr auto;gap:8px;align-items:end;margin-top:8px}
+  .note{font-size:12px;padding:10px 12px;border-radius:8px;background:#eff4ff;color:#334e9e;border:1px solid #d7e3ff}
+  .toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%);background:#111827;color:#fff;padding:11px 18px;border-radius:10px;font-size:13px;box-shadow:0 8px 24px rgba(0,0,0,.25);z-index:80;opacity:0;transition:.2s}
+  .toast.show{opacity:1}
+  footer{color:var(--muted);font-size:12px;text-align:center;padding:20px}
+  .split{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+  @media(max-width:760px){.split{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>Route4Me Workaround</h1>
+    <div class="sub">ERP export &rarr; Route4Me upload &middot; local &amp; offline</div>
+  </div>
+  <nav class="tabs">
+    <div class="tab active" data-tab="convert">Convert</div>
+    <div class="tab" data-tab="subs">Subdivisions</div>
+    <div class="tab" data-tab="crews">Crews / Depots</div>
+  </nav>
+</header>
+
+<main>
+  <!-- ================= CONVERT ================= -->
+  <section id="tab-convert">
+    <div class="card">
+      <h2>1. Drop your ERP export</h2>
+      <p class="help">Upload the CSV straight from your ERP. The tool inserts <b>Latitude</b> / <b>Longitude</b> (from your library),
+        appends a <b>Depot</b> column, and adds your crew-home depot rows &mdash; ready to upload to Route4Me. Every original field is preserved exactly.</p>
+      <div id="drop" class="drop">
+        <p style="margin:0 0 8px"><b>Drag &amp; drop</b> the ERP CSV here, or</p>
+        <button class="primary" id="pickBtn">Choose file&hellip;</button>
+        <input type="file" id="file" accept=".csv,text/csv" class="hide">
+        <p id="fileName" class="muted" style="margin:12px 0 0"></p>
+      </div>
+    </div>
+
+    <div class="card hide" id="resultCard">
+      <h2>2. Review</h2>
+      <div class="stat" id="stats"></div>
+      <div style="margin:16px 0" id="warnBox"></div>
+      <div class="row">
+        <button class="primary" id="downloadBtn">Download Route4Me CSV</button>
+        <button id="reviewUnmatchedBtn" class="hide">Fix unmatched subs</button>
+        <span class="muted" id="outName"></span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= SUBDIVISIONS ================= -->
+  <section id="tab-subs" class="hide">
+    <div class="card">
+      <h2>Subdivision library</h2>
+      <p class="help">The lat/long source. Matching order: exact name &rarr; alias &rarr; 25-char truncation. Aliases hold the shortened / misspelled forms your ERP produces.</p>
+      <div class="toolbar">
+        <input type="search" class="grow" id="subSearch" placeholder="Search name or alias&hellip;">
+        <button class="primary small" id="addSubBtn">+ Add subdivision</button>
+        <button class="small" id="exportSubs">Export JSON</button>
+        <button class="small" id="importSubsBtn">Import JSON</button>
+        <input type="file" id="importSubs" accept=".json" class="hide">
+        <button class="small danger" id="resetSubs">Reset to seed</button>
+      </div>
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th style="width:26%">Name</th><th>Aliases</th><th style="width:150px">Lat / Long</th><th style="width:90px"></th></tr></thead>
+          <tbody id="subBody"></tbody>
+        </table>
+      </div>
+      <p class="muted" id="subCount" style="margin:10px 2px 0"></p>
+    </div>
+  </section>
+
+  <!-- ================= CREWS ================= -->
+  <section id="tab-crews" class="hide">
+    <div class="card">
+      <h2>Crew / depot library</h2>
+      <p class="help">Each crew starts and ends at home. These become the <b>Depot</b> rows (Depot = 1) appended to every Route4Me upload.</p>
+      <div class="toolbar">
+        <input type="search" class="grow" id="crewSearch" placeholder="Search crew&hellip;">
+        <button class="primary small" id="addCrewBtn">+ Add crew</button>
+        <button class="small" id="exportCrews">Export JSON</button>
+        <button class="small" id="importCrewsBtn">Import JSON</button>
+        <input type="file" id="importCrews" accept=".json" class="hide">
+        <button class="small danger" id="resetCrews">Reset to seed</button>
+      </div>
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th>Crew</th><th>Depot label</th><th style="width:180px">Lat / Long</th><th style="width:90px"></th></tr></thead>
+          <tbody id="crewBody"></tbody>
+        </table>
+      </div>
+      <p class="muted" id="crewCount" style="margin:10px 2px 0"></p>
+    </div>
+  </section>
+</main>
+
+<footer>Runs entirely in your browser. Nothing is uploaded. Libraries are saved locally on this computer.</footer>
+
+<div id="modalRoot"></div>
+<div id="toast" class="toast"></div>
+
+<script>
+/* ============================ SEED DATA ============================ */
+const SUBS_SEED = [{"name":"Atla Key","address":"(pin drop only)","lat":26.79539,"lng":-81.704087,"aliases":[]},{"name":"Avalon Lake Townhomes","address":"(pin drop only)","lat":28.510332,"lng":-81.157184,"aliases":[]},{"name":"Babcock Ranch Community (Sanctuary)","address":"44848 Callisia Court","lat":26.797585,"lng":-81.723735,"aliases":["Babcock Ranch Community ("]},{"name":"Benton Hills","address":"31323 Albarino Dr, Brooksville, FL 34602","lat":28.483553,"lng":-82.226273,"aliases":[]},{"name":"Berry Bay","address":"(pin drop only)","lat":27.673494,"lng":-82.34718,"aliases":[]},{"name":"Bloomingdale Townes","address":"1054 Golden Willow Ct, Brandon, FL 33511","lat":27.897603,"lng":-82.265629,"aliases":[]},{"name":"Brighton/Jacaranda","address":"9544 Vibrant Ln, Venice, FL 34292","lat":27.089331,"lng":-82.387711,"aliases":["Brighton-Jacaranda"]},{"name":"Bronsons Ridge","address":"1812 rider rain ln, apopka, fl 32703","lat":28.66121,"lng":-81.537856,"aliases":[]},{"name":"Cassata Lakes","address":"(pin drop only)","lat":27.14327,"lng":-82.42731,"aliases":[]},{"name":"Central Parc","address":"(pin drop only)","lat":27.048673,"lng":-82.222496,"aliases":[]},{"name":"Congdon Townhomes (Grove","address":"(pin drop only)","lat":28.124466,"lng":-81.593193,"aliases":[]},{"name":"Copperleaf","address":"10555 SW 76th Ct, Ocala, FL 34476","lat":29.068921,"lng":-82.248447,"aliases":[]},{"name":"Creekside at Rutland Ranch","address":"6515 tortoise trl, parrish, fl 34219","lat":27.571835,"lng":-82.382179,"aliases":["Creekside At Rutland Ranc"]},{"name":"Cresswind at Lake Harris","address":"(pin drop only)","lat":28.790011,"lng":-81.774676,"aliases":[]},{"name":"Cresswind Jax","address":"(pin drop only)","lat":29.43104,"lng":-81.15579,"aliases":["Cresswind"]},{"name":"Crosswind Ranch","address":"13037 Pierce St, Parrish, FL 34219, USA","lat":27.595899,"lng":-82.410901,"aliases":[]},{"name":"Crosswinds East","address":"4350 riverbend blvd, haines city, fl 33844","lat":28.122548,"lng":-81.584936,"aliases":[]},{"name":"Crystal Lake Preserve","address":"311 Biltmore Blvd, Dundee, FL 33838","lat":28.026937,"lng":-81.635874,"aliases":[]},{"name":"EA McKinnon Groves","address":"(pin drop only)","lat":28.508966,"lng":-81.662882,"aliases":["EA-McKinnon Groves","EA McKinnon Grove"]},{"name":"Edgewater Cross Prairie","address":"5094 loyalty dr, st cloud, fl 34772","lat":28.218153,"lng":-81.335569,"aliases":[]},{"name":"Esplanade at Center Lake Ranch","address":"5292 Goldfinch Dr, St Cloud, FL 34771","lat":28.280765,"lng":-81.222724,"aliases":["Esplanade at Center Lake"]},{"name":"Founders Corner (Waterlin","address":"(pin drop only)","lat":28.154544,"lng":-81.273941,"aliases":[]},{"name":"Garden Hill at Providence","address":"5148 bridgehaven rd, fl 33837","lat":28.190841,"lng":-81.547661,"aliases":[]},{"name":"Gum Lake Preserve","address":"3314 Chinotto Drive","lat":28.12373,"lng":-81.730394,"aliases":[]},{"name":"Hamilton Bluff","address":"1528 redwood ln, haines city, fl 33844","lat":28.049394,"lng":-81.613997,"aliases":["Hamilton Bluff Subdivision","Hamilton Bluff Subdivisio"]},{"name":"Heritage Station","address":"25584 Calusa Dr, Punta Gorda, FL 33955","lat":26.936444,"lng":-82.044431,"aliases":[]},{"name":"Hidden Ridge at Estate","address":"929 tundra lp, groveland, fl 34736","lat":28.60532,"lng":-81.802779,"aliases":[]},{"name":"Hidden Ridge at Estates at Cherry Lake","address":"929 Tundra Lp, Groveland, FL 34736","lat":28.60532,"lng":-81.802779,"aliases":["Hidden Ridge at Estates a"]},{"name":"Hillcrest East","address":"(pin drop only)","lat":28.329297,"lng":-82.357896,"aliases":[]},{"name":"Hills of Montverde","address":"Serenity wy, fl 34756","lat":28.585986,"lng":-81.705044,"aliases":["Hills of Monteverde"]},{"name":"K-Bar Ranch Homestead (Mo","address":"(pin drop only)","lat":28.157169,"lng":-82.271849,"aliases":[]},{"name":"Kentucky Square","address":"(pin drop only)","lat":28.757126,"lng":-81.226236,"aliases":[]},{"name":"Kings Gate","address":"(pin drop only)","lat":27.007797,"lng":-82.04718,"aliases":[]},{"name":"Landings at Pecan Park","address":"14591 Macadamia Ln, Jacksonville, FL 32218","lat":30.504495,"lng":-81.627032,"aliases":[]},{"name":"Laureate Park","address":"9176 sinatra ln orlando fl 32827","lat":28.350933,"lng":-81.256177,"aliases":[]},{"name":"Laurel Preserve","address":"(pin drop only)","lat":30.801581,"lng":-81.608186,"aliases":[]},{"name":"Leala Reserve","address":"2603 Priya Drive, Tavares, FL 32778","lat":28.76691,"lng":-81.755603,"aliases":["Leela Reserve"]},{"name":"Liberty Trace","address":"(pin drop only)","lat":28.106857,"lng":-81.596948,"aliases":[]},{"name":"Lochside","address":"19337 lochside ln, mt dora, fl 32757","lat":28.82423,"lng":-81.63696,"aliases":[]},{"name":"Magnolia Bay North","address":"205 Holly Bank Ave, Nokomis, FL 34275","lat":27.163068,"lng":-82.425181,"aliases":[]},{"name":"Magnolia Bay South","address":"205 Holly Bank Ave, Nokomis, FL 34275","lat":27.156824,"lng":-82.417018,"aliases":[]},{"name":"Mandarin Grove","address":"(pin drop only)","lat":27.614976,"lng":-82.526656,"aliases":[]},{"name":"Meadow Pointe at Esta","address":"929 tundra lp, groveland, fl 34736","lat":28.60532,"lng":-81.802779,"aliases":["Meadow Pointe & Hidden Rd"]},{"name":"Meadow Pointe at Estates at Cherry Lake","address":"929 Tundra Lp, Groveland, FL 34736, USA","lat":28.60532,"lng":-81.802779,"aliases":["Meadow Pointe at Estates"]},{"name":"Northshore","address":"100 Longshore Dr, Kingsland, GA 31548","lat":30.808358,"lng":-81.782039,"aliases":[]},{"name":"Oak Hammock Reserve","address":"1363 Blue Ash Ln, DeLand, FL 32720","lat":29.004912,"lng":-81.327861,"aliases":[]},{"name":"Palm Grove at Lakewood Ranch","address":"2013 COCONUT PALM Cv, Bradenton, FL 34212","lat":27.478866,"lng":-82.358128,"aliases":["Palm Grove at Lakewood Ranch Subdivision","Palm Grove at Lakewood Ra"]},{"name":"Palmera At Wellen Park","address":"18477 Foxtail Lp, Venice, FL 34293","lat":27.019319,"lng":-82.329395,"aliases":["Palmera Townhomes at Well"]},{"name":"Palms (Venetian Bay)","address":"112 Venetian Palms Blvd, New Smyrna Beach, FL 32168","lat":29.02637,"lng":-81.023055,"aliases":[]},{"name":"Palms at West Port","address":"1433 Remington Trce Dr, Port Charlotte, FL 33953","lat":27.000063,"lng":-82.186393,"aliases":[]},{"name":"Parkside Townhomes","address":"1531 Tristar Dr, Plant City, FL 33563","lat":28.014906,"lng":-82.107045,"aliases":[]},{"name":"Parkview at Hamlin","address":"15501 Hamlin Pk Dr, Winter Garden, FL 34787","lat":28.476191,"lng":-81.618014,"aliases":[]},{"name":"Parrish Lakes","address":"sawgrass rd parrish fl 34219","lat":27.586489,"lng":-82.464395,"aliases":["Parish Lakes [Searle]","Parish Lakes [Seairie]","Parrish Lakes [Seaitle]","Parish Lakes (Searle)","Parrish Lakes (Seairie)","Parrish Lakes (Searle)","Parrish Lakes (Seaire)"]},{"name":"Pepper Grove","address":"3459 canberra pl, palmetto, fl 34221","lat":27.546204,"lng":-82.530664,"aliases":["Pepper Grove (f.k.a. Paddocks)","Pepper Grove (f.k.a. Padd"]},{"name":"Pine Grove Reserve","address":"(pin drop only)","lat":28.253289,"lng":-81.196976,"aliases":[]},{"name":"Plat of Subdivision SurveyEsplanade at St. Marys","address":"251 Grandview Drive, St Marys, GA 31558","lat":30.779394,"lng":-81.616158,"aliases":["Plat of Subdivision Survey(Esplanade at St. Marys)","Plat of Subdivision Surve"]},{"name":"Poitras N-4 West","address":"(pin drop only)","lat":28.35655,"lng":-81.262412,"aliases":[]},{"name":"Riverbank Place","address":"3682 Arbordale Lp, Sanford, FL 32771","lat":28.806127,"lng":-81.226816,"aliases":[]},{"name":"Riverstone","address":"20195 Azul Marble, Land O' Lakes, FL 34638","lat":28.203252,"lng":-82.482822,"aliases":[]},{"name":"Rivington","address":"639 terrapin dr, debary, fl 32713","lat":28.855197,"lng":-81.342132,"aliases":[]},{"name":"Saddlestone at Star Farms Lakewood Ranch","address":"17943 Cropside Trl, Lakewood Ranch, FL 34211","lat":27.464526,"lng":-82.354918,"aliases":["Saddlestone at Star Farms"]},{"name":"Sanderling","address":"1639 Soaring Vida St, Palmetto, FL 34221","lat":27.564886,"lng":-82.547048,"aliases":[]},{"name":"Sandhill Preserve","address":"5601 Dease Road","lat":28.32287,"lng":-81.204667,"aliases":[]},{"name":"Sandpiper Pointe","address":"(pin drop only)","lat":26.952897,"lng":-82.340878,"aliases":[]},{"name":"Seminole Palms","address":"35 Enclave Ave, Palm Coast, FL 32164","lat":29.453207,"lng":-81.202959,"aliases":[]},{"name":"Seminole Palms Townhomes","address":"42 Alexander Lane, palm coast, fl 32164","lat":29.450891,"lng":-81.184391,"aliases":[]},{"name":"Shearwater","address":"32 Buffalo Ct, St. Augustine, FL 32092","lat":29.916846,"lng":-81.541755,"aliases":[]},{"name":"Shoreline Ranch","address":"(pin drop only)","lat":28.912564,"lng":-81.617563,"aliases":[]},{"name":"Skye Ranch","address":"8208 Summer Night Rd, Sarasota, FL 34241, USA","lat":27.240884,"lng":-82.402261,"aliases":["Skye Ranch Neighborhood","LT Ranch Neighborhood One"]},{"name":"Sorrento Pines","address":"(pin drop only)","lat":28.835565,"lng":-81.563712,"aliases":[]},{"name":"Southern Hills Plantation","address":"4951 Summit View Dr, Brooksville, FL 34601","lat":28.507977,"lng":-82.402231,"aliases":[]},{"name":"Star Farms","address":"16921 Barnwood Pl, Lakewood Ranch, FL 34211","lat":27.467033,"lng":-82.367552,"aliases":[]},{"name":"Stillwater at Lakewood Ranch","address":"5637 Lightning Whelk Ln, Lakewood Ranch, FL 34211","lat":27.440941,"lng":-82.350128,"aliases":["Stillwater at Lakewood Ra"]},{"name":"Sunstone Village","address":"Starbright path, venice, fl 34293","lat":27.025859,"lng":-82.317625,"aliases":["Sunstone Village (Lakeside)","Sunstone Village [Lakeside]","Sunstone Village (Lakesid"]},{"name":"The Villas at Camden","address":"100 the villas wy, kingsland, GA 31548","lat":30.78413,"lng":-81.628176,"aliases":[]},{"name":"The Villas at Camden Woods","address":"205 Collin Nicholas Dr, Kingsland, GA 31548","lat":30.785467,"lng":-81.62521,"aliases":["The Villas at Camden Wood"]},{"name":"Tiburon","address":"Foxboro wy, laurel fl 34275","lat":27.158254,"lng":-82.432611,"aliases":[]},{"name":"Tideline","address":"1008 Tideline Cove, Bradenton, FL 34209","lat":27.502814,"lng":-82.657801,"aliases":[]},{"name":"Townwalk","address":"(pin drop only)","lat":26.777827,"lng":-81.747429,"aliases":[]},{"name":"Trailside","address":"30182 rustic mills st, mt dora, fl 32757","lat":28.78855,"lng":-81.590972,"aliases":[]},{"name":"Turnleaf","address":"13542 Turnleaf Blvd, Punta Gorda, FL 33955","lat":26.838392,"lng":-82.014873,"aliases":[]},{"name":"Two Rivers","address":"(pin drop only)","lat":28.181651,"lng":-82.23576,"aliases":[]},{"name":"Village (Atla Key)","address":"16506 Sundial Circle","lat":26.798438,"lng":-81.699311,"aliases":[]},{"name":"Villamar","address":"3745 Giorgio Dr, Winter Haven, FL 33884","lat":27.956209,"lng":-81.695727,"aliases":[]},{"name":"Villas at Bishop Oaks","address":"10629 Waterfield Rd, Jacksonville, FL 32210","lat":30.248519,"lng":-81.83773,"aliases":[]},{"name":"Vintera Townhomes","address":"15150 Ginetti St, Nokomis, FL 34275","lat":27.162126,"lng":-82.454876,"aliases":["Vinterra Townhomes"]},{"name":"Vistera","address":"(pin drop only)","lat":27.129224,"lng":-82.391913,"aliases":[]},{"name":"Waters at Center Lake Ranch","address":"5292 Goldfinch Dr, St Cloud, FL 34771","lat":28.28002,"lng":-81.234541,"aliases":["Waters at Center Lake Ran"]},{"name":"Waterset Wolf Creek","address":"5357 Wolf Crk Dr, Apollo Beach, FL 33572","lat":27.747934,"lng":-82.39336,"aliases":[]},{"name":"Waterstone Subdivision","address":"2722 Portadown St, Ormond Beach, FL 32174","lat":29.300489,"lng":-81.112506,"aliases":[]},{"name":"Weslyn Park","address":"3166 Sailhouse Drive","lat":28.336818,"lng":-81.170369,"aliases":[]},{"name":"Westview","address":"5644 morant bay path, kissimmee fl 34758","lat":28.156969,"lng":-81.507465,"aliases":[]},{"name":"Whispering Lakes","address":"(pin drop only)","lat":26.586817,"lng":-81.617136,"aliases":[]},{"name":"Windward Preserve","address":"3862 Windward Dr, Cocoa, FL 32926","lat":28.405683,"lng":-80.811896,"aliases":[]},{"name":"Windwater","address":"5018 123rd Ave E, Parrish, FL 34219","lat":27.560294,"lng":-82.422772,"aliases":[]},{"name":"Woodland Crossings","address":"(pin drop only)","lat":28.884086,"lng":-82.086428,"aliases":[]},{"name":"Woodland Preserve","address":"5035 Shade Forest Dr, Parrish, FL 34219","lat":27.559855,"lng":-82.397532,"aliases":[]},{"name":"Woodland Ranch Estates","address":"208 Spindlewood Blvd, Lake Wales, FL 33898","lat":28.012769,"lng":-81.582085,"aliases":[]},{"name":"Wynnstone","address":"4507 Wynnstone Dr, Davenport, FL 33837","lat":28.202575,"lng":-81.645108,"aliases":[]}];
+const CREWS_SEED = [{"name":"Hunter","lat":30.277278,"lng":-81.73279},{"name":"Steven","lat":28.51403924410546,"lng":-81.48095821},{"name":"Ayinde","lat":28.158096,"lng":-81.497195},{"name":"Johnathan","lat":28.521713,"lng":-81.289175},{"name":"Paul","lat":28.753204,"lng":-81.28209},{"name":"Eric","lat":28.476193,"lng":-81.269467},{"name":"Daniel","lat":28.460857,"lng":-82.495107},{"name":"Kameron","lat":28.183023,"lng":-82.403044},{"name":"Joseph","lat":27.07305,"lng":-82.174303},{"name":"Owen","lat":26.972213,"lng":-82.089491},{"name":"Gustavo","lat":26.617244,"lng":-81.928241}];
+
+/* ============================ STORAGE ============================ */
+const K_SUBS='r4m_subs_v1', K_CREWS='r4m_crews_v1', K_LASTIMPORT='r4m_lastimport_v1';
+function load(key,seed){ try{const v=localStorage.getItem(key); if(v) return JSON.parse(v);}catch(e){} return JSON.parse(JSON.stringify(seed)); }
+function save(key,val){ localStorage.setItem(key,JSON.stringify(val)); }
+let SUBS = load(K_SUBS,SUBS_SEED);
+let CREWS = load(K_CREWS,CREWS_SEED);
+function persistSubs(){ save(K_SUBS,SUBS); }
+function persistCrews(){ save(K_CREWS,CREWS); }
+
+/* ============================ MATCHING ============================ */
+function norm(s){ return String(s==null?'':s).trim().toLowerCase().replace(/\s+/g,' '); }
+function buildIndex(){
+  const byName=new Map(), byAlias=new Map();
+  for(const s of SUBS){
+    byName.set(norm(s.name),s);
+    for(const a of (s.aliases||[])) byAlias.set(norm(a),s);
+  }
+  return {byName,byAlias};
+}
+/* returns {sub, how} or {sub:null, how} */
+function matchSub(value, idx){
+  const n=norm(value);
+  if(!n) return {sub:null,how:'empty'};
+  if(idx.byName.has(n)) return {sub:idx.byName.get(n),how:'name'};
+  if(idx.byAlias.has(n)) return {sub:idx.byAlias.get(n),how:'alias'};
+  // truncation: library full name starts with the (shorter) ERP value
+  const cand=SUBS.filter(s=>norm(s.name).startsWith(n));
+  if(cand.length===1) return {sub:cand[0],how:'prefix'};
+  // alias truncation
+  const am=new Map();
+  for(const s of SUBS) for(const a of (s.aliases||[])) if(norm(a).startsWith(n)) am.set(s.name,s);
+  if(am.size===1) return {sub:[...am.values()][0],how:'aliasprefix'};
+  if(cand.length>1) return {sub:null,how:'ambiguous'};
+  return {sub:null,how:'miss'};
+}
+
+/* ============================ CSV ============================ */
+function parseCSV(text){
+  // returns array of rows (array of string cells). Handles quotes + CRLF. Preserves cell text incl. padding.
+  const rows=[]; let row=[], cell='', i=0, q=false; const n=text.length;
+  while(i<n){
+    const c=text[i];
+    if(q){
+      if(c==='"'){ if(text[i+1]==='"'){cell+='"';i+=2;continue;} q=false;i++;continue; }
+      cell+=c;i++;continue;
+    }
+    if(c==='"'){ q=true;i++;continue; }
+    if(c===','){ row.push(cell);cell='';i++;continue; }
+    if(c==='\n'){ row.push(cell);rows.push(row);row=[];cell='';i++;continue; }
+    if(c==='\r'){ i++;continue; }
+    cell+=c;i++;
+  }
+  if(cell!==''||row.length){ row.push(cell);rows.push(row); }
+  return rows;
+}
+function csvCell(v){
+  const s=String(v==null?'':v);
+  return /[",\n\r]/.test(s) ? '"'+s.replace(/"/g,'""')+'"' : s;
+}
+function toCSV(rows){ return rows.map(r=>r.map(csvCell).join(',')).join('\r\n'); }
+
+/* ============================ CONVERT ============================ */
+let lastResult=null; // {rows, outName, unmatched}
+const LAT_H='Latitude', LNG_H='Longitude', DEPOT_H='Depot';
+
+function findCol(header, name){
+  const target=norm(name);
+  for(let i=0;i<header.length;i++) if(norm(header[i])===target) return i;
+  return -1;
+}
+
+function convert(text, sourceName){
+  const rows=parseCSV(text).filter(r=>r.some(c=>String(c).trim()!==''));
+  if(!rows.length) throw new Error('Empty file.');
+  const header=rows[0];
+  const iAddr=findCol(header,'Address 1');
+  const iSub=findCol(header,'Subdiv Name');
+  if(iAddr<0) throw new Error('Could not find an "Address 1" column in this file.');
+  if(iSub<0) throw new Error('Could not find a "Subdiv Name" column in this file.');
+
+  // Already converted? (has Latitude col) -> we rebuild from scratch anyway using original layout.
+  const alreadyHasLat=findCol(header,LAT_H)>=0;
+
+  const idx=buildIndex();
+  const out=[];
+  // Build new header: insert Lat/Lng after Address, drop any pre-existing Lat/Lng/Depot, append Depot.
+  const skip=new Set([findCol(header,LAT_H),findCol(header,LNG_H),findCol(header,DEPOT_H)].filter(x=>x>=0));
+  function reshape(cells, latVal, lngVal, depotVal){
+    const o=[];
+    for(let c=0;c<header.length;c++){
+      if(skip.has(c)) continue;
+      o.push(cells[c]==null?'':cells[c]);
+      if(c===iAddr){ o.push(latVal); o.push(lngVal); }
+    }
+    o.push(depotVal);
+    return o;
+  }
+  out.push(reshape(header, LAT_H, LNG_H, DEPOT_H));
+
+  const unmatched=new Map(); // erpName -> {count, sampleRowIdx}
+  let matched=0, jobs=0;
+  for(let r=1;r<rows.length;r++){
+    const cells=rows[r];
+    jobs++;
+    const subVal=cells[iSub]!=null?cells[iSub]:'';
+    const m=matchSub(subVal, idx);
+    let lat='', lng='';
+    if(m.sub){ lat=fmtCoord(m.sub.lat); lng=fmtCoord(m.sub.lng); matched++; }
+    else{
+      const key=String(subVal).trim();
+      const rec=unmatched.get(key)||{count:0};
+      rec.count++; unmatched.set(key,rec);
+    }
+    out.push(reshape(cells, lat, lng, ''));
+  }
+  // depot rows
+  for(const cw of CREWS){
+    const cells=new Array(header.length).fill('');
+    cells[iAddr]=(cw.name||'')+' Home';
+    // reshape will place lat/lng after address; put coords via reshape args, and mark depot=1
+    out.push(reshape(cells, fmtCoord(cw.lat), fmtCoord(cw.lng), '1'));
+  }
+
+  const outName=(sourceName||'export').replace(/\.csv$/i,'')+'_geocoded.csv';
+  return {rows:out, outName, unmatched, matched, jobs, depots:CREWS.length};
+}
+function fmtCoord(v){
+  if(v==null||v==='') return '';
+  const n=Number(v);
+  return isNaN(n)?String(v):String(n);
+}
+
+function runConvert(text, name){
+  let res;
+  try{ res=convert(text,name); }
+  catch(e){ showToast(e.message); return; }
+  // stash raw import for later export-patchwork
+  try{ save(K_LASTIMPORT,{name,text,when:Date.now()}); }catch(e){}
+  lastResult=res;
+  renderResult(res);
+  if(res.unmatched.size){ openUnmatchedModal(res.unmatched, ()=>{ runConvert(text,name); }); }
+}
+
+function renderResult(res){
+  document.getElementById('resultCard').classList.remove('hide');
+  document.getElementById('stats').innerHTML=`
+    <div><b>${res.jobs}</b>job rows</div>
+    <div><b>${res.matched}</b>geocoded</div>
+    <div><b>${res.unmatched.size}</b>unmatched</div>
+    <div><b>${res.depots}</b>depot rows</div>`;
+  const warn=document.getElementById('warnBox');
+  if(res.unmatched.size){
+    const names=[...res.unmatched.keys()].map(k=>`<span class="chip">${esc(k||'(blank)')}</span>`).join('');
+    warn.innerHTML=`<div class="unmatched"><span class="badge warn">Needs attention</span>
+      <div style="margin-top:8px">${res.unmatched.size} subdivision(s) not in your library &mdash; these job rows will have <b>blank coordinates</b> until you add them:</div>
+      <div style="margin-top:8px">${names}</div></div>`;
+    document.getElementById('reviewUnmatchedBtn').classList.remove('hide');
+  }else{
+    warn.innerHTML=`<div class="note">All subdivisions matched. Ready to upload to Route4Me.</div>`;
+    document.getElementById('reviewUnmatchedBtn').classList.add('hide');
+  }
+  document.getElementById('outName').textContent='will save as: '+res.outName;
+}
+
+function downloadResult(){
+  if(!lastResult) return;
+  const blob=new Blob([toCSV(lastResult.rows)],{type:'text/csv'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob); a.download=lastResult.outName;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(a.href),2000);
+}
+
+/* ============================ UNMATCHED MODAL ============================ */
+function openUnmatchedModal(unmatched, onResolvedRerun){
+  const items=[...unmatched.entries()];
+  const root=document.getElementById('modalRoot');
+  root.innerHTML=`
+  <div class="backdrop">
+    <div class="modal">
+      <div class="mh"><h3>${items.length} subdivision(s) not in your library</h3>
+        <div class="muted" style="font-size:13px;margin-top:4px">Add coordinates for each, or skip and convert with blanks. New entries are saved to your library (the ERP spelling is stored as an alias).</div></div>
+      <div class="mb" id="umBody">
+        ${items.map((it,i)=>umRow(it[0],it[1].count,i)).join('')}
+      </div>
+      <div class="mf">
+        <button id="umSkip">Convert with blanks</button>
+        <button class="primary" id="umDone" disabled>Save &amp; re-convert</button>
+      </div>
+    </div>
+  </div>`;
+  const remaining=new Set(items.map((_,i)=>i));
+  function refreshDone(){ document.getElementById('umDone').disabled = remaining.size>0 ? false : false; }
+  // enable "Save & re-convert" whenever at least one saved; else stays enabled but does nothing new
+  document.getElementById('umDone').disabled=true;
+  root.querySelectorAll('[data-save]').forEach(btn=>{
+    btn.addEventListener('click',()=>{
+      const i=+btn.dataset.save;
+      const name=items[i][0];
+      const lat=root.querySelector(`[data-lat="${i}"]`).value.trim();
+      const lng=root.querySelector(`[data-lng="${i}"]`).value.trim();
+      const canon=root.querySelector(`[data-canon="${i}"]`).value.trim()||name;
+      if(!isFinite(+lat)||!isFinite(+lng)||lat===''||lng===''){ showToast('Enter valid lat & long'); return; }
+      // find existing sub by canonical name, else create
+      let sub=SUBS.find(s=>norm(s.name)===norm(canon));
+      if(sub){
+        if(norm(canon)!==norm(name) && !(sub.aliases||[]).some(a=>norm(a)===norm(name))){ (sub.aliases=sub.aliases||[]).push(name); }
+        sub.lat=+lat; sub.lng=+lng;
+      }else{
+        const aliases = norm(canon)!==norm(name) ? [name] : [];
+        SUBS.push({name:canon,address:'',lat:+lat,lng:+lng,aliases});
+      }
+      persistSubs();
+      btn.textContent='Saved'; btn.disabled=true;
+      root.querySelector(`[data-lat="${i}"]`).disabled=true;
+      root.querySelector(`[data-lng="${i}"]`).disabled=true;
+      root.querySelector(`[data-canon="${i}"]`).disabled=true;
+      document.getElementById('umDone').disabled=false;
+    });
+  });
+  document.getElementById('umSkip').addEventListener('click',()=>{ root.innerHTML=''; showToast('Converted with blank coordinates for unmatched rows'); });
+  document.getElementById('umDone').addEventListener('click',()=>{ root.innerHTML=''; renderSubs(); onResolvedRerun(); showToast('Library updated & re-converted'); });
+}
+function umRow(name,count,i){
+  return `<div class="unmatched">
+    <div class="nm">${esc(name||'(blank)')}</div>
+    <div class="cnt">${count} job row(s)</div>
+    <div style="margin-top:8px"><label class="fld">Save under library name (edit if this is a truncation/misspelling of an existing sub)</label>
+      <input type="text" data-canon="${i}" value="${esc(name)}"></div>
+    <div class="grid3">
+      <div><label class="fld">Latitude</label><input type="number" step="any" data-lat="${i}" placeholder="28.1234"></div>
+      <div><label class="fld">Longitude</label><input type="number" step="any" data-lng="${i}" placeholder="-81.5678"></div>
+      <div><button class="primary" data-save="${i}">Save</button></div>
+    </div>
+  </div>`;
+}
+
+/* ============================ SUBS TABLE ============================ */
+function renderSubs(){
+  const q=norm(document.getElementById('subSearch').value);
+  const body=document.getElementById('subBody');
+  const list=SUBS.map((s,i)=>({s,i}))
+    .filter(({s})=>!q || norm(s.name).includes(q) || (s.aliases||[]).some(a=>norm(a).includes(q)))
+    .sort((a,b)=>a.s.name.localeCompare(b.s.name));
+  body.innerHTML=list.map(({s,i})=>`
+    <tr>
+      <td><b>${esc(s.name)}</b>${s.address?`<div class="muted" style="font-size:11px">${esc(s.address)}</div>`:''}</td>
+      <td>${(s.aliases||[]).map((a,ai)=>`<span class="chip">${esc(a)}<span class="x" data-delalias="${i}" data-ai="${ai}">&times;</span></span>`).join('')||'<span class="muted">&mdash;</span>'}
+          <span class="chip" style="cursor:pointer;background:#eef6ff;color:#2563eb" data-addalias="${i}">+ alias</span></td>
+      <td class="pin">${fmtCoord(s.lat)}<br>${fmtCoord(s.lng)}</td>
+      <td><button class="small" data-editsub="${i}">Edit</button> <button class="small danger" data-delsub="${i}">Del</button></td>
+    </tr>`).join('');
+  document.getElementById('subCount').textContent=`${SUBS.length} subdivisions${q?` (${list.length} shown)`:''}`;
+}
+
+/* ============================ CREWS TABLE ============================ */
+function renderCrews(){
+  const q=norm(document.getElementById('crewSearch').value);
+  const body=document.getElementById('crewBody');
+  const list=CREWS.map((c,i)=>({c,i})).filter(({c})=>!q||norm(c.name).includes(q));
+  body.innerHTML=list.map(({c,i})=>`
+    <tr>
+      <td><b>${esc(c.name)}</b></td>
+      <td class="muted">${esc(c.name)} Home</td>
+      <td class="pin">${fmtCoord(c.lat)}, ${fmtCoord(c.lng)}</td>
+      <td><button class="small" data-editcrew="${i}">Edit</button> <button class="small danger" data-delcrew="${i}">Del</button></td>
+    </tr>`).join('');
+  document.getElementById('crewCount').textContent=`${CREWS.length} crews${q?` (${list.length} shown)`:''}`;
+}
+
+/* ============================ EDIT MODALS ============================ */
+function editSubModal(i){
+  const isNew=i<0;
+  const s=isNew?{name:'',address:'',lat:'',lng:'',aliases:[]}:SUBS[i];
+  const root=document.getElementById('modalRoot');
+  root.innerHTML=`<div class="backdrop"><div class="modal"><div class="mh"><h3>${isNew?'Add':'Edit'} subdivision</h3></div>
+    <div class="mb">
+      <div style="margin-bottom:12px"><label class="fld">Name</label><input type="text" id="e_name" value="${esc(s.name)}"></div>
+      <div style="margin-bottom:12px"><label class="fld">Address (optional)</label><input type="text" id="e_addr" value="${esc(s.address||'')}"></div>
+      <div class="split" style="margin-bottom:12px">
+        <div><label class="fld">Latitude</label><input type="number" step="any" id="e_lat" value="${s.lat}"></div>
+        <div><label class="fld">Longitude</label><input type="number" step="any" id="e_lng" value="${s.lng}"></div>
+      </div>
+      <div><label class="fld">Aliases (one per line &mdash; the shortened/misspelled ERP forms)</label>
+        <textarea id="e_aliases" style="width:100%;min-height:90px;font:inherit;padding:8px 10px;border:1px solid var(--line);border-radius:8px">${esc((s.aliases||[]).join('\n'))}</textarea></div>
+    </div>
+    <div class="mf"><button id="e_cancel">Cancel</button><button class="primary" id="e_save">Save</button></div>
+  </div></div>`;
+  document.getElementById('e_cancel').onclick=()=>root.innerHTML='';
+  document.getElementById('e_save').onclick=()=>{
+    const name=document.getElementById('e_name').value.trim();
+    const lat=document.getElementById('e_lat').value.trim();
+    const lng=document.getElementById('e_lng').value.trim();
+    if(!name){ showToast('Name is required'); return; }
+    if(lat===''||lng===''||!isFinite(+lat)||!isFinite(+lng)){ showToast('Valid lat & long required'); return; }
+    const rec={name,address:document.getElementById('e_addr').value.trim(),lat:+lat,lng:+lng,
+      aliases:document.getElementById('e_aliases').value.split('\n').map(x=>x.trim()).filter(Boolean)};
+    if(isNew) SUBS.push(rec); else SUBS[i]=rec;
+    persistSubs(); root.innerHTML=''; renderSubs(); showToast('Saved');
+  };
+}
+function editCrewModal(i){
+  const isNew=i<0;
+  const c=isNew?{name:'',lat:'',lng:''}:CREWS[i];
+  const root=document.getElementById('modalRoot');
+  root.innerHTML=`<div class="backdrop"><div class="modal"><div class="mh"><h3>${isNew?'Add':'Edit'} crew</h3></div>
+    <div class="mb">
+      <div style="margin-bottom:12px"><label class="fld">Crew name</label><input type="text" id="c_name" value="${esc(c.name)}" placeholder="Hunter">
+        <div class="muted" style="font-size:11px;margin-top:4px">Depot row will read &ldquo;<span id="c_prev">${esc(c.name||'Name')}</span> Home&rdquo;</div></div>
+      <div class="split">
+        <div><label class="fld">Latitude</label><input type="number" step="any" id="c_lat" value="${c.lat}"></div>
+        <div><label class="fld">Longitude</label><input type="number" step="any" id="c_lng" value="${c.lng}"></div>
+      </div>
+    </div>
+    <div class="mf"><button id="c_cancel">Cancel</button><button class="primary" id="c_save">Save</button></div>
+  </div></div>`;
+  document.getElementById('c_name').oninput=e=>document.getElementById('c_prev').textContent=e.target.value||'Name';
+  document.getElementById('c_cancel').onclick=()=>root.innerHTML='';
+  document.getElementById('c_save').onclick=()=>{
+    const name=document.getElementById('c_name').value.trim();
+    const lat=document.getElementById('c_lat').value.trim();
+    const lng=document.getElementById('c_lng').value.trim();
+    if(!name){ showToast('Crew name required'); return; }
+    if(lat===''||lng===''||!isFinite(+lat)||!isFinite(+lng)){ showToast('Valid lat & long required'); return; }
+    const rec={name,lat:+lat,lng:+lng};
+    if(isNew) CREWS.push(rec); else CREWS[i]=rec;
+    persistCrews(); root.innerHTML=''; renderCrews(); showToast('Saved');
+  };
+}
+
+/* ============================ HELPERS ============================ */
+function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+let toastT;
+function showToast(msg){ const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(toastT); toastT=setTimeout(()=>t.classList.remove('show'),2600); }
+function download(name,text,type){ const b=new Blob([text],{type:type||'application/json'}); const a=document.createElement('a'); a.href=URL.createObjectURL(b); a.download=name; a.click(); setTimeout(()=>URL.revokeObjectURL(a.href),2000); }
+
+/* ============================ WIRING ============================ */
+// tabs
+document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{
+  document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
+  t.classList.add('active');
+  ['convert','subs','crews'].forEach(id=>document.getElementById('tab-'+id).classList.toggle('hide',id!==t.dataset.tab));
+});
+// file / drop
+const drop=document.getElementById('drop'), fileInput=document.getElementById('file');
+document.getElementById('pickBtn').onclick=()=>fileInput.click();
+fileInput.onchange=e=>{ const f=e.target.files[0]; if(f) readFile(f); };
+;['dragenter','dragover'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add('drag');}));
+;['dragleave','drop'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove('drag');}));
+drop.addEventListener('drop',e=>{ const f=e.dataTransfer.files[0]; if(f) readFile(f); });
+function readFile(f){
+  document.getElementById('fileName').textContent=f.name;
+  const rd=new FileReader();
+  rd.onload=()=>runConvert(rd.result,f.name);
+  rd.readAsText(f);
+}
+document.getElementById('downloadBtn').onclick=downloadResult;
+document.getElementById('reviewUnmatchedBtn').onclick=()=>{ if(lastResult&&lastResult.unmatched.size){ const li=load(K_LASTIMPORT,null); if(li) openUnmatchedModal(lastResult.unmatched,()=>runConvert(li.text,li.name)); } };
+
+// subs
+document.getElementById('subSearch').oninput=renderSubs;
+document.getElementById('addSubBtn').onclick=()=>editSubModal(-1);
+document.getElementById('exportSubs').onclick=()=>download('subdivisions.json',JSON.stringify(SUBS,null,2));
+document.getElementById('importSubsBtn').onclick=()=>document.getElementById('importSubs').click();
+document.getElementById('importSubs').onchange=e=>{ const f=e.target.files[0]; if(!f)return; const rd=new FileReader(); rd.onload=()=>{ try{const d=JSON.parse(rd.result); if(!Array.isArray(d))throw 0; SUBS=d.map(x=>({name:x.name||'',address:x.address||'',lat:x.lat,lng:x.lng,aliases:x.aliases||[]})); persistSubs(); renderSubs(); showToast('Imported '+SUBS.length+' subdivisions'); }catch(err){ showToast('Invalid JSON'); } }; rd.readAsText(f); e.target.value=''; };
+document.getElementById('resetSubs').onclick=()=>{ if(confirm('Reset the subdivision library to the original seed? Your changes will be lost.')){ SUBS=JSON.parse(JSON.stringify(SUBS_SEED)); persistSubs(); renderSubs(); showToast('Reset'); } };
+document.getElementById('subBody').addEventListener('click',e=>{
+  const t=e.target;
+  if(t.dataset.editsub!=null) return editSubModal(+t.dataset.editsub);
+  if(t.dataset.delsub!=null){ const i=+t.dataset.delsub; if(confirm('Delete "'+SUBS[i].name+'"?')){ SUBS.splice(i,1); persistSubs(); renderSubs(); } return; }
+  if(t.dataset.delalias!=null){ const i=+t.dataset.delalias, ai=+t.dataset.ai; SUBS[i].aliases.splice(ai,1); persistSubs(); renderSubs(); return; }
+  if(t.dataset.addalias!=null){ const i=+t.dataset.addalias; const a=prompt('New alias (the ERP spelling) for "'+SUBS[i].name+'":'); if(a&&a.trim()){ (SUBS[i].aliases=SUBS[i].aliases||[]).push(a.trim()); persistSubs(); renderSubs(); } return; }
+});
+
+// crews
+document.getElementById('crewSearch').oninput=renderCrews;
+document.getElementById('addCrewBtn').onclick=()=>editCrewModal(-1);
+document.getElementById('exportCrews').onclick=()=>download('crews.json',JSON.stringify(CREWS,null,2));
+document.getElementById('importCrewsBtn').onclick=()=>document.getElementById('importCrews').click();
+document.getElementById('importCrews').onchange=e=>{ const f=e.target.files[0]; if(!f)return; const rd=new FileReader(); rd.onload=()=>{ try{const d=JSON.parse(rd.result); if(!Array.isArray(d))throw 0; CREWS=d.map(x=>({name:x.name||'',lat:x.lat,lng:x.lng})); persistCrews(); renderCrews(); showToast('Imported '+CREWS.length+' crews'); }catch(err){ showToast('Invalid JSON'); } }; rd.readAsText(f); e.target.value=''; };
+document.getElementById('resetCrews').onclick=()=>{ if(confirm('Reset the crew library to the original seed?')){ CREWS=JSON.parse(JSON.stringify(CREWS_SEED)); persistCrews(); renderCrews(); showToast('Reset'); } };
+document.getElementById('crewBody').addEventListener('click',e=>{
+  const t=e.target;
+  if(t.dataset.editcrew!=null) return editCrewModal(+t.dataset.editcrew);
+  if(t.dataset.delcrew!=null){ const i=+t.dataset.delcrew; if(confirm('Delete crew "'+CREWS[i].name+'"?')){ CREWS.splice(i,1); persistCrews(); renderCrews(); } }
+});
+
+// init
+renderSubs(); renderCrews();
+</script>
+</body>
+</html>
