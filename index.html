@@ -124,6 +124,7 @@
       <h2>2. Review &amp; trim jobs</h2>
       <p class="help">Sort by any column (click a header). Select rows to drop &mdash; click, <b>Shift+click</b> for a range,
         <b>Ctrl/Cmd+click</b> to toggle &mdash; then <b>Remove selected</b>. Handy for pulling jobs by date before routing.</p>
+      <div id="trimWarn" class="hide" style="margin-bottom:14px"></div>
       <div class="toolbar">
         <button class="small danger" id="removeSelBtn">Remove selected (0)</button>
         <button class="small" id="restoreBtn">Restore removed</button>
@@ -417,6 +418,17 @@ function loadFile01ForReview(text,name){
     ['Subdiv Name','text'],['Address 1','text']];
   jobsCols=want.map(([n,t])=>({name:n,i:findCol(jobsHeader,n),type:t})).filter(c=>c.i>=0);
   try{ save(K_LASTIMPORT,{name,text,when:0}); }catch(e){}   // stash full original for the reverse trip
+  // guard: warn if this looks like an already-processed file02 (has Depot/Lat/Long col or depot rows)
+  const hasProcCol = ['Depot','Latitude','Longitude'].some(n=>findCol(jobsHeader,n)>=0);
+  const iAddrW = findCol(jobsHeader,'Address 1');
+  const hasHomeRows = iAddrW>=0 && jobsRows.some(r=>/\bhome$/i.test(String(r.cells[iAddrW]||'').trim()));
+  const warn=document.getElementById('trimWarn');
+  if(hasProcCol||hasHomeRows){
+    warn.className='';
+    warn.innerHTML=`<div class="unmatched"><span class="badge warn">Heads up</span>
+      This looks like an <b>already-processed file (file02)</b>${hasProcCol?' &mdash; it has a Depot/Latitude/Longitude column':''}${hasHomeRows?' &mdash; it contains crew <b>&ldquo;Home&rdquo;</b> depot rows':''}.
+      For a clean run, drop the <b>raw Sage export (file01)</b> instead. You can still continue if this was intentional.</div>`;
+  } else { warn.className='hide'; warn.innerHTML=''; }
   document.getElementById('trimCard').classList.remove('hide');
   document.getElementById('resultCard').classList.add('hide');
   renderJobs();
@@ -567,10 +579,12 @@ function reverseConvert(f03Text, f01Text){
   const st={kept:0, out2if:0, feKept:0, fvKept:0, dropCFF:0, dropUnassigned:0};
   const missingCode=new Map();   // "First Last" -> count (crew found, no code)
   const unknownCrew=new Map();   // "First Last" -> count (not in library)
+  const f01svc=new Set();
   for(let li=1;li<f1.length;li++){
     const cells=f1[li];
     const status=String(cells[iStat]||'').trim();
     const svc=String(cells[iSvc]||'').trim();
+    if(svc) f01svc.add(svc);
     if(status==='CFF'){ st.dropCFF++; continue; }
     if(!assign.has(svc)){ st.dropUnassigned++; continue; }
     const a=assign.get(svc);
@@ -591,9 +605,12 @@ function reverseConvert(f03Text, f01Text){
     st.kept++;
     if(status==='OUT') st.out2if++; else if(status==='FE') st.feKept++; else if(status==='FV') st.fvKept++;
   }
+  // mismatch signal: routed jobs (from file03) that aren't in this file01
+  const routedTotal=assign.size;
+  const routedMissing=[...assign.keys()].filter(s=>!f01svc.has(s)).length;
   const q = s => '"'+String(s==null?'':s).replace(/"/g,'""')+'"';
   const text = outRows.map(r=>r.map(q).join(',')).join('\n')+'\n';
-  return {text, outName:`Sage Import ${todayStamp()}.csv`, st, missingCode, unknownCrew};
+  return {text, outName:`Sage Import ${todayStamp()}.csv`, st, missingCode, unknownCrew, routedTotal, routedMissing};
 }
 function toMMDDYY(s){
   s=String(s==null?'':s).trim();
@@ -618,6 +635,13 @@ function runReverse(){
     <div><b>${s.dropCFF}</b>CFF dropped</div>
     <div><b>${s.dropUnassigned}</b>unassigned dropped</div>`;
   const probs=[];
+  if(res.routedMissing>0){
+    const frac=res.routedTotal?Math.round(100*res.routedMissing/res.routedTotal):0;
+    probs.push(`<div class="unmatched" style="border-left-color:var(--err);background:var(--err-bg)"><span class="badge err">file01 doesn&rsquo;t match file03</span>
+      <div style="margin-top:6px"><b>${res.routedMissing} of ${res.routedTotal}</b> routed jobs (${frac}%) in file03 aren&rsquo;t in the loaded file01
+      &mdash; so this file01 is probably the wrong batch. Load the raw Sage export that produced <i>this</i> routing with
+      <b>&ldquo;Use a different file01&rdquo;</b> above, then it&rsquo;ll re-run.</div></div>`);
+  }
   if(res.unknownCrew.size) probs.push(`<div class="unmatched"><span class="badge err">Unknown crew</span>
     <div style="margin-top:6px">These drivers from file03 aren&rsquo;t in your Crews library, so Servicer Id was left unchanged:</div>
     <div style="margin-top:6px">${[...res.unknownCrew].map(([k,n])=>`<span class="chip">${esc(k)} &times;${n}</span>`).join('')}</div></div>`);
