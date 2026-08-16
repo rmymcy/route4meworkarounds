@@ -59,6 +59,12 @@
   .switch .track:before{content:"";position:absolute;height:16px;width:16px;left:3px;top:3px;background:#fff;border-radius:50%;transition:.15s}
   .switch input:checked+.track{background:var(--ok)}
   .switch input:checked+.track:before{transform:translateX(16px)}
+  #jobsTable{user-select:none}
+  #jobsTable th.sortable{cursor:pointer;white-space:nowrap}
+  #jobsTable th .arr{color:var(--brand);font-size:10px}
+  #jobsTable tbody tr{cursor:pointer}
+  #jobsTable tbody tr.sel td{background:#e8f0fe}
+  #jobsTable tbody tr.sel:hover td{background:#dfe9fd}
   .stat{display:flex;gap:22px;flex-wrap:wrap;margin:4px 0 0}
   .stat div{font-size:12px;color:var(--muted)}
   .stat b{display:block;font-size:22px;color:var(--ink);font-weight:700;line-height:1.1}
@@ -114,8 +120,26 @@
       </div>
     </div>
 
+    <div class="card hide" id="trimCard">
+      <h2>2. Review &amp; trim jobs</h2>
+      <p class="help">Sort by any column (click a header). Select rows to drop &mdash; click, <b>Shift+click</b> for a range,
+        <b>Ctrl/Cmd+click</b> to toggle &mdash; then <b>Remove selected</b>. Handy for pulling jobs by date before routing.</p>
+      <div class="toolbar">
+        <button class="small danger" id="removeSelBtn">Remove selected (0)</button>
+        <button class="small" id="restoreBtn">Restore removed</button>
+        <span class="muted grow" id="trimCount"></span>
+        <button class="primary" id="genBtn">Build Route4Me file &rarr;</button>
+      </div>
+      <div class="tablewrap" style="max-height:52vh">
+        <table id="jobsTable">
+          <thead><tr id="jobsHead"></tr></thead>
+          <tbody id="jobsBody"></tbody>
+        </table>
+      </div>
+    </div>
+
     <div class="card hide" id="resultCard">
-      <h2>2. Review</h2>
+      <h2>3. Download</h2>
       <div class="stat" id="stats"></div>
       <div style="margin:16px 0" id="warnBox"></div>
       <div class="row">
@@ -301,6 +325,9 @@ function findCol(header, name){
 function convert(text, sourceName){
   const rows=parseCSV(text).filter(r=>r.some(c=>String(c).trim()!==''));
   if(!rows.length) throw new Error('Empty file.');
+  return buildFile02(rows);
+}
+function buildFile02(rows){
   const header=rows[0];
   const iAddr=findCol(header,'Address 1');
   const iSub=findCol(header,'Subdiv Name');
@@ -367,6 +394,92 @@ function fmtCoord(v){
   const n=Number(v);
   return isNaN(n)?String(v):String(n);
 }
+
+/* ============================ JOBS TABLE (trim file01 before Send) ============================ */
+let jobsHeader=null, jobsRows=[], jobsCols=[], jobsSort={i:null,dir:1}, jobsSel=new Set(), jobsAnchor=null;
+function parseDateKey(s){
+  const m=String(s==null?'':s).trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+  if(!m) return null;
+  let y=+m[3]; if(y<100) y+=2000;
+  return y*10000 + (+m[1])*100 + (+m[2]);
+}
+function loadFile01ForReview(text,name){
+  let rows;
+  try{ rows=parseCSV(text).filter(r=>r.some(c=>String(c).trim()!=='')); }
+  catch(e){ showToast('Could not read that CSV'); return; }
+  if(rows.length<2){ showToast('That file has no job rows'); return; }
+  jobsHeader=rows[0];
+  jobsRows=rows.slice(1).map((cells,i)=>({cells,id:i,removed:false}));
+  jobsSel=new Set(); jobsAnchor=null; jobsSort={i:null,dir:1};
+  // display columns (by header name; skipped silently if absent)
+  const want=[['Svc Job Num','text'],['Received Date','date'],['Schedule_Date','date'],
+    ['Description Of Problem','text'],['Status Code','text'],['Priority','text'],
+    ['Subdiv Name','text'],['Address 1','text']];
+  jobsCols=want.map(([n,t])=>({name:n,i:findCol(jobsHeader,n),type:t})).filter(c=>c.i>=0);
+  try{ save(K_LASTIMPORT,{name,text,when:0}); }catch(e){}   // stash full original for the reverse trip
+  document.getElementById('trimCard').classList.remove('hide');
+  document.getElementById('resultCard').classList.add('hide');
+  renderJobs();
+}
+function jobsView(){
+  const v=jobsRows.filter(r=>!r.removed);
+  if(jobsSort.i!=null){
+    const col=jobsCols.find(c=>c.i===jobsSort.i), dir=jobsSort.dir;
+    v.sort((ra,rb)=>{
+      const a=ra.cells[jobsSort.i], b=rb.cells[jobsSort.i];
+      let x,y;
+      if(col && col.type==='date'){ x=parseDateKey(a); y=parseDateKey(b); }
+      else { const na=parseFloat(a), nb=parseFloat(b);
+        if(!isNaN(na)&&!isNaN(nb)&&/^\s*-?\d/.test(String(a))&&/^\s*-?\d/.test(String(b))){ x=na; y=nb; }
+        else { x=String(a==null?'':a).trim().toLowerCase(); y=String(b==null?'':b).trim().toLowerCase(); } }
+      if(x==null&&y==null) return 0; if(x==null) return 1; if(y==null) return -1;
+      return x<y ? -dir : x>y ? dir : 0;
+    });
+  }
+  return v;
+}
+function renderJobs(){
+  const head=document.getElementById('jobsHead');
+  head.innerHTML=`<th style="width:34px"><input type="checkbox" id="jobsAll"></th>`+
+    jobsCols.map(c=>{ const on=jobsSort.i===c.i; const arr=on?(jobsSort.dir>0?' ▲':' ▼'):'';
+      return `<th class="sortable" data-sort="${c.i}">${esc(c.name)}<span class="arr">${arr}</span></th>`; }).join('');
+  const view=jobsView();
+  const body=document.getElementById('jobsBody');
+  body.innerHTML=view.map(r=>`<tr data-id="${r.id}" class="${jobsSel.has(r.id)?'sel':''}">`+
+    `<td><input type="checkbox" data-cb="${r.id}" ${jobsSel.has(r.id)?'checked':''}></td>`+
+    jobsCols.map(c=>`<td>${esc(String(r.cells[c.i]==null?'':r.cells[c.i]).trim())}</td>`).join('')+`</tr>`).join('');
+  const removed=jobsRows.filter(r=>r.removed).length;
+  document.getElementById('trimCount').textContent=`${view.length} jobs${removed?` · ${removed} removed`:''} · ${jobsSel.size} selected`;
+  document.getElementById('removeSelBtn').textContent=`Remove selected (${jobsSel.size})`;
+  const all=document.getElementById('jobsAll');
+  if(all) all.checked = view.length>0 && view.every(r=>jobsSel.has(r.id));
+}
+function jobsClick(e){
+  const tr=e.target.closest('tr[data-id]'); if(!tr) return;
+  const id=+tr.dataset.id;
+  const view=jobsView(), ids=view.map(r=>r.id);
+  const isCb = e.target.matches('input[data-cb]');
+  if(e.shiftKey && jobsAnchor!=null && ids.includes(jobsAnchor)){
+    e.preventDefault();
+    const a=ids.indexOf(jobsAnchor), b=ids.indexOf(id), lo=Math.min(a,b), hi=Math.max(a,b);
+    for(let k=lo;k<=hi;k++) jobsSel.add(ids[k]);
+  } else if(isCb || e.ctrlKey || e.metaKey){
+    if(jobsSel.has(id)) jobsSel.delete(id); else jobsSel.add(id);
+    jobsAnchor=id;
+  } else {
+    jobsSel.clear(); jobsSel.add(id); jobsAnchor=id;
+  }
+  renderJobs();
+}
+function runConvertRows(header, dataRows){
+  let res;
+  try{ res=buildFile02([header, ...dataRows]); }
+  catch(e){ showToast(e.message); return; }
+  lastResult=res; lastGenHeader=header; lastGenRows=dataRows;
+  renderResult(res);
+  if(res.unmatched.size){ openUnmatchedModal(res.unmatched, ()=>runConvertRows(header,dataRows)); }
+}
+let lastGenHeader=null, lastGenRows=null;
 
 function runConvert(text, name){
   let res;
@@ -721,9 +834,31 @@ drop.addEventListener('drop',e=>{ const f=e.dataTransfer.files[0]; if(f) readFil
 function readFile(f){
   document.getElementById('fileName').textContent=f.name;
   const rd=new FileReader();
-  rd.onload=()=>runConvert(rd.result,f.name);
+  rd.onload=()=>loadFile01ForReview(rd.result,f.name);
   rd.readAsText(f);
 }
+// jobs table interactions
+document.getElementById('jobsBody').addEventListener('click',jobsClick);
+document.getElementById('jobsHead').addEventListener('click',e=>{
+  if(e.target.id==='jobsAll'){ const view=jobsView(); const allOn=view.length>0&&view.every(r=>jobsSel.has(r.id));
+    if(allOn) view.forEach(r=>jobsSel.delete(r.id)); else view.forEach(r=>jobsSel.add(r.id)); renderJobs(); return; }
+  const th=e.target.closest('th[data-sort]'); if(!th) return;
+  const i=+th.dataset.sort;
+  if(jobsSort.i===i) jobsSort.dir*=-1; else { jobsSort.i=i; jobsSort.dir=1; }
+  renderJobs();
+});
+document.getElementById('removeSelBtn').onclick=()=>{
+  if(!jobsSel.size){ showToast('Select rows first'); return; }
+  jobsRows.forEach(r=>{ if(jobsSel.has(r.id)) r.removed=true; });
+  const n=jobsSel.size; jobsSel.clear(); jobsAnchor=null; renderJobs(); showToast(`Removed ${n} job(s)`);
+};
+document.getElementById('restoreBtn').onclick=()=>{ jobsRows.forEach(r=>r.removed=false); renderJobs(); showToast('Restored'); };
+document.getElementById('genBtn').onclick=()=>{
+  const kept=jobsRows.filter(r=>!r.removed).map(r=>r.cells);
+  if(!kept.length){ showToast('No jobs left to send'); return; }
+  runConvertRows(jobsHeader, kept);
+  document.getElementById('resultCard').scrollIntoView({behavior:'smooth',block:'nearest'});
+};
 
 // Bring back (file03 -> file04)
 (function(){
@@ -744,7 +879,7 @@ document.getElementById('f1pickBtn').onclick=()=>document.getElementById('f1file
 document.getElementById('f1file').onchange=e=>{ const f=e.target.files[0]; if(!f)return; const rd=new FileReader(); rd.onload=()=>{ setFile01(rd.result,f.name,false); if(file03Text) runReverse(); }; rd.readAsText(f); };
 document.getElementById('download4Btn').onclick=download4;
 document.getElementById('downloadBtn').onclick=downloadResult;
-document.getElementById('reviewUnmatchedBtn').onclick=()=>{ if(lastResult&&lastResult.unmatched.size){ const li=load(K_LASTIMPORT,null); if(li) openUnmatchedModal(lastResult.unmatched,()=>runConvert(li.text,li.name)); } };
+document.getElementById('reviewUnmatchedBtn').onclick=()=>{ if(lastResult&&lastResult.unmatched.size&&lastGenHeader) openUnmatchedModal(lastResult.unmatched,()=>runConvertRows(lastGenHeader,lastGenRows)); };
 
 // subs
 document.getElementById('subSearch').oninput=renderSubs;
