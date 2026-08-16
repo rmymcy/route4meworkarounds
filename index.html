@@ -574,9 +574,13 @@ function reverseConvert(f03Text, f01Text){
     assign.set(svc,{first:String(f3rows[r][c3f]||'').trim(), last:String(f3rows[r][c3l]||'').trim()});
   }
 
-  // Sage import format: every field quoted, values trimmed, dates MM/DD/YY, LF line endings.
-  const isDateCol = ci => norm(f1cols[ci])==='received date' || norm(f1cols[ci])==='schedule_date';
-  const outRows=[ f1cols.slice() ];  // header (trimmed column names)
+  // Always emit the fixed 15-column Sage import template, pulling values by column NAME
+  // (so a file02, a reordered export, etc. still produce the correct file04).
+  const OUT_COLS=['Received Date','Servicer Id','Status Code','Builder Name','Master Job','Svc Job Num',
+    'Address 1','Map Code','Subdiv Name','Section','Description Of Problem','Priority','Division','Title','Schedule_Date'];
+  const srcIdx=OUT_COLS.map(n=>f1cols.findIndex(c=>norm(c)===norm(n)));
+  const isDateName = n => norm(n)==='received date' || norm(n)==='schedule_date';
+  const outRows=[ OUT_COLS.slice() ];  // canonical header
   const st={kept:0, out2if:0, feKept:0, fvKept:0, dropCFF:0, dropUnassigned:0};
   const missingCode=new Map();   // "First Last" -> count (crew found, no code)
   const unknownCrew=new Map();   // "First Last" -> count (not in library)
@@ -595,11 +599,12 @@ function reverseConvert(f03Text, f01Text){
     else if(!crew.code) missingCode.set(who,(missingCode.get(who)||0)+1);
     const newSid = (crew && crew.code) ? crew.code : String(cells[iSid]||'').trim(); // keep original if no code
     const newStatus = status==='OUT' ? 'IF' : status; // FE/FV unchanged
-    const rec = f1cols.map((_,ci)=>{
-      let v = String(cells[ci]==null?'':cells[ci]).trim();
-      if(ci===iSid) v=newSid;
-      else if(ci===iStat) v=newStatus;
-      else if(isDateCol(ci)) v=toMMDDYY(v);
+    const rec = OUT_COLS.map((name,k)=>{
+      const si=srcIdx[k];
+      let v = si>=0 ? String(cells[si]==null?'':cells[si]).trim() : '';
+      if(norm(name)==='servicer id') v=newSid;
+      else if(norm(name)==='status code') v=newStatus;
+      else if(isDateName(name)) v=toMMDDYY(v);
       return v;
     });
     outRows.push(rec);
