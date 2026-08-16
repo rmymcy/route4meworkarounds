@@ -418,6 +418,7 @@ function loadFile01ForReview(text,name){
     ['Subdiv Name','text'],['Address 1','text']];
   jobsCols=want.map(([n,t])=>({name:n,i:findCol(jobsHeader,n),type:t})).filter(c=>c.i>=0);
   try{ save(K_LASTIMPORT,{name,text,when:0}); }catch(e){}   // stash full original for the reverse trip
+  setFile01(text,name,true);   // keep the Bring-back tab's file01 in sync with the latest Send
   // guard: warn if this looks like an already-processed file02 (has Depot/Lat/Long col or depot rows)
   const hasProcCol = ['Depot','Latitude','Longitude'].some(n=>findCol(jobsHeader,n)>=0);
   const iAddrW = findCol(jobsHeader,'Address 1');
