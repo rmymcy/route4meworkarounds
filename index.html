@@ -193,6 +193,8 @@
       <div class="toolbar">
         <input type="search" class="grow" id="subSearch" placeholder="Search name or alias&hellip;">
         <button class="primary small" id="addSubBtn">+ Add subdivision</button>
+        <button class="small" id="kmzBtn">Update from KMZ&hellip;</button>
+        <input type="file" id="kmzFile" accept=".kmz,.kml" multiple class="hide">
         <button class="small" id="exportSubs">Export JSON</button>
         <button class="small" id="importSubsBtn">Import JSON</button>
         <input type="file" id="importSubs" accept=".json" class="hide">
@@ -841,6 +843,137 @@ function editCrewModal(i){
   };
 }
 
+/* ============================ KMZ IMPORT (update library from Google Earth files) ============================ */
+async function inflateRaw(bytes){
+  if(typeof DecompressionStream==='undefined') throw new Error('This browser can’t unzip KMZ (needs a newer browser).');
+  const stream=new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+async function readKmlFromKmz(arrayBuffer){
+  const dv=new DataView(arrayBuffer), u8=new Uint8Array(arrayBuffer);
+  let eocd=-1;
+  for(let i=u8.length-22;i>=0;i--){ if(dv.getUint32(i,true)===0x06054b50){ eocd=i; break; } }
+  if(eocd<0) throw new Error('Not a valid KMZ.');
+  const cdOff=dv.getUint32(eocd+16,true), cdCount=dv.getUint16(eocd+10,true);
+  let p=cdOff, kml=null;
+  for(let n=0;n<cdCount;n++){
+    if(dv.getUint32(p,true)!==0x02014b50) break;
+    const method=dv.getUint16(p+10,true), compSize=dv.getUint32(p+20,true);
+    const nameLen=dv.getUint16(p+28,true), extraLen=dv.getUint16(p+30,true), commentLen=dv.getUint16(p+32,true);
+    const localOff=dv.getUint32(p+42,true);
+    const name=new TextDecoder().decode(u8.subarray(p+46,p+46+nameLen));
+    if(name.toLowerCase().endsWith('.kml') && (!kml || name.toLowerCase()==='doc.kml')) kml={method,compSize,localOff};
+    p+=46+nameLen+extraLen+commentLen;
+  }
+  if(!kml) throw new Error('No .kml inside the KMZ.');
+  const lh=kml.localOff;
+  const dataStart=lh+30+dv.getUint16(lh+26,true)+dv.getUint16(lh+28,true);
+  const comp=u8.subarray(dataStart, dataStart+kml.compSize);
+  const raw = kml.method===0 ? comp : await inflateRaw(comp);
+  return new TextDecoder('utf-8').decode(raw);
+}
+function extractLocationsFromKml(kmlText){
+  const doc=new DOMParser().parseFromString(kmlText,'application/xml');
+  if(doc.getElementsByTagName('parsererror').length) throw new Error('Couldn’t read the KML.');
+  const tag=(root,t)=>Array.from(root.getElementsByTagNameNS('*',t));
+  const ftext=(root,t)=>{ const e=tag(root,t)[0]; return e?e.textContent.trim():''; };
+  const out=[];
+  tag(doc,'GroundOverlay').forEach(go=>{                    // georeferenced site-plan image -> box center
+    const box=tag(go,'LatLonBox')[0]; if(!box) return;
+    const n=+ftext(box,'north'), s=+ftext(box,'south'), e=+ftext(box,'east'), w=+ftext(box,'west');
+    if([n,s,e,w].every(Number.isFinite)) out.push({name:ftext(go,'name'), lat:(n+s)/2, lng:(e+w)/2, kind:'overlay'});
+  });
+  tag(doc,'Placemark').forEach(pm=>{                        // pin -> point; boundary -> centroid
+    const nm=ftext(pm,'name');
+    const pt=tag(pm,'Point')[0];
+    if(pt){ const c=tag(pt,'coordinates')[0]; if(c){ const [lng,lat]=c.textContent.trim().split(/\s*,\s*/).map(Number);
+      if(Number.isFinite(lat)&&Number.isFinite(lng)){ out.push({name:nm,lat,lng,kind:'point'}); return; } } }
+    const poly=tag(pm,'Polygon')[0]||tag(pm,'LineString')[0];
+    if(poly){ const c=tag(poly,'coordinates')[0]; if(c){
+      const pts=c.textContent.trim().split(/\s+/).map(t=>t.split(',').map(Number)).filter(a=>a.length>=2&&Number.isFinite(a[0])&&Number.isFinite(a[1]));
+      if(pts.length){ out.push({name:nm, lat:pts.reduce((s,p)=>s+p[1],0)/pts.length, lng:pts.reduce((s,p)=>s+p[0],0)/pts.length, kind:'boundary'}); } } }
+  });
+  return out;
+}
+function matchSubForKmz(name, idx){
+  const m=matchSub(name, idx);            // exact / alias / (KMZ shorter than library)
+  if(m.sub) return m;
+  const n=norm(name);                     // KMZ often longer ("... Phase 3") -> longest library prefix wins
+  let best=null, bestLen=0;
+  for(const s of SUBS) for(const c of [s.name, ...(s.aliases||[])]){ const nc=norm(c);
+    if(nc && (n===nc || n.startsWith(nc+' ')) && nc.length>bestLen){ best=s; bestLen=nc.length; } }
+  return best ? {sub:best, how:'phase'} : {sub:null, how:'miss'};
+}
+function stripPhase(n){ return String(n||'').replace(/\s+(phase|ph|sht|sheet|unit|pod|parcel|section|sec)\s*\d.*$/i,'').trim()||String(n||''); }
+function rnd(v){ return Math.round(Number(v)*1e6)/1e6; }
+async function processKmzFiles(files){
+  const locs=[], errs=[];
+  for(const f of files){
+    try{
+      const kml = /\.kml$/i.test(f.name) ? await f.text() : await readKmlFromKmz(await f.arrayBuffer());
+      const found=extractLocationsFromKml(kml);
+      if(!found.length) errs.push(`${f.name}: no location found`);
+      found.forEach(x=>{ if(x.name) locs.push({...x,src:f.name}); });
+    }catch(e){ errs.push(`${f.name}: ${e.message}`); }
+  }
+  if(!locs.length){ showToast(errs[0]||'No locations found'); return; }
+  openKmzReview(locs, errs);
+}
+let kmzRows=[];
+function openKmzReview(locs, errs){
+  const idx=buildIndex();
+  kmzRows=locs.map((L,i)=>{
+    const m=matchSubForKmz(L.name, idx), sub=m.sub;
+    const hasCoord = sub && sub.lat!=null&&sub.lat!==''&&sub.lng!=null&&sub.lng!=='';
+    const status = !sub ? 'new' : (hasCoord ? 'exists' : 'fill');
+    return {...L, i, subName: sub?sub.name:null, status, apply: status!=='exists', newName: stripPhase(L.name)};
+  });
+  const badge=s=> s==='new'?'<span class="badge ok">new</span>' : s==='fill'?'<span class="badge warn">fill blank</span>' : '<span class="badge">has coords</span>';
+  const rowHtml=r=>`<tr>
+    <td><input type="checkbox" data-kzapply="${r.i}" ${r.apply?'checked':''}></td>
+    <td>${r.status==='new'
+        ? `<input type="text" data-kzname="${r.i}" value="${esc(r.newName)}" style="width:100%">`
+        : `<b>${esc(r.subName)}</b>`}
+      <div class="muted" style="font-size:11px">KMZ: ${esc(r.name)} · ${esc(r.src)}</div></td>
+    <td>${badge(r.status)}</td>
+    <td class="pin">${r.status==='exists' ? `<span class="muted">${fmtCoord(kmzSub(r).lat)}, ${fmtCoord(kmzSub(r).lng)}</span>` : '&mdash;'}</td>
+    <td class="pin">${rnd(r.lat)}, ${rnd(r.lng)}</td>
+  </tr>`;
+  const root=document.getElementById('modalRoot');
+  root.innerHTML=`<div class="backdrop"><div class="modal" style="max-width:820px"><div class="mh"><h3>Update library from KMZ</h3>
+      <div class="muted" style="font-size:13px;margin-top:4px">${kmzRows.length} location(s) found. New subs and blank ones are checked by default; check a “has coords” row only if you want to overwrite it.</div>
+      ${errs.length?`<div class="muted" style="font-size:12px;margin-top:6px;color:var(--warn)">${errs.map(esc).join('<br>')}</div>`:''}</div>
+    <div class="mb"><div class="tablewrap" style="max-height:50vh"><table>
+      <thead><tr><th style="width:34px"></th><th>Subdivision</th><th style="width:90px">Status</th><th style="width:150px">Current</th><th style="width:150px">KMZ center</th></tr></thead>
+      <tbody id="kzBody">${kmzRows.map(rowHtml).join('')}</tbody></table></div></div>
+    <div class="mf"><button id="kzCancel">Cancel</button><button class="primary" id="kzApply">Apply checked</button></div>
+  </div></div>`;
+  root.querySelector('#kzBody').addEventListener('change',e=>{
+    if(e.target.dataset.kzapply!=null){ const r=kmzRows[+e.target.dataset.kzapply]; if(r) r.apply=e.target.checked; }
+    if(e.target.dataset.kzname!=null){ const r=kmzRows[+e.target.dataset.kzname]; if(r) r.newName=e.target.value; }
+  });
+  document.getElementById('kzCancel').onclick=()=>root.innerHTML='';
+  document.getElementById('kzApply').onclick=()=>applyKmz();
+}
+function kmzSub(r){ return SUBS.find(s=>s.name===r.subName)||{lat:'',lng:''}; }
+function applyKmz(){
+  let filled=0, added=0;
+  for(const r of kmzRows){
+    if(!r.apply) continue;
+    if(r.status==='new'){
+      const nm=(r.newName||r.name||'').trim(); if(!nm) continue;
+      const existing=SUBS.find(s=>norm(s.name)===norm(nm));
+      if(existing){ existing.lat=rnd(r.lat); existing.lng=rnd(r.lng); filled++; }
+      else { SUBS.push({name:nm, address:'(from KMZ)', lat:rnd(r.lat), lng:rnd(r.lng), aliases:[]}); added++; }
+    } else {
+      const sub=SUBS.find(s=>s.name===r.subName); if(!sub) continue;
+      sub.lat=rnd(r.lat); sub.lng=rnd(r.lng); filled++;
+    }
+  }
+  persistSubs(); document.getElementById('modalRoot').innerHTML=''; renderSubs();
+  showToast(`KMZ applied: ${added} added, ${filled} updated`);
+}
+
 /* ============================ HELPERS ============================ */
 function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 let toastT;
@@ -914,6 +1047,8 @@ document.getElementById('reviewUnmatchedBtn').onclick=()=>{ if(lastResult&&lastR
 // subs
 document.getElementById('subSearch').oninput=renderSubs;
 document.getElementById('addSubBtn').onclick=()=>editSubModal(-1);
+document.getElementById('kmzBtn').onclick=()=>document.getElementById('kmzFile').click();
+document.getElementById('kmzFile').onchange=e=>{ const fs=[...e.target.files]; if(fs.length) processKmzFiles(fs); e.target.value=''; };
 document.getElementById('exportSubs').onclick=()=>download('subdivisions.json',JSON.stringify(SUBS,null,2));
 document.getElementById('importSubsBtn').onclick=()=>document.getElementById('importSubs').click();
 document.getElementById('importSubs').onchange=e=>{ const f=e.target.files[0]; if(!f)return; const rd=new FileReader(); rd.onload=()=>{ try{const d=JSON.parse(rd.result); if(!Array.isArray(d))throw 0; SUBS=d.map(x=>({name:x.name||'',address:x.address||'',lat:x.lat,lng:x.lng,aliases:x.aliases||[]})); persistSubs(); renderSubs(); showToast('Imported '+SUBS.length+' subdivisions'); }catch(err){ showToast('Invalid JSON'); } }; rd.readAsText(f); e.target.value=''; };
