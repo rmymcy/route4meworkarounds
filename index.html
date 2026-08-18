@@ -1237,6 +1237,11 @@ async function idbSet(key,val){ try{ const db=await idbOpen(); await new Promise
 async function idbGet(key){ try{ const db=await idbOpen(); const v=await new Promise((res,rej)=>{ const tx=db.transaction('kv','readonly');
   const rq=tx.objectStore('kv').get(key); rq.onsuccess=()=>res(rq.result); rq.onerror=()=>rej(rq.error); }); db.close(); return v; }catch(e){ return null; } }
 
+/* ---- crawl/read cancellation ---- */
+let KMZ_CANCEL=false;
+function cancelKmzScan(){ KMZ_CANCEL=true; }
+const KMZ_STOP_BTN=` <button class="small danger" data-stop style="margin-left:10px;vertical-align:middle">&#9632; Stop</button>`;
+
 /* ---- per-file parse cache: skip re-reading KMZs that haven't changed ---- */
 const K_KMZCACHE='r4m_kmzcache_v1';
 let KMZCACHE=load(K_KMZCACHE,{});
@@ -1254,13 +1259,15 @@ async function scanFolderModern(dirHandle){
     }
     idbSet('lastDir',dirHandle).then(()=>document.getElementById('kmzRescanBtn').classList.remove('hide'));
   }
+  KMZ_CANCEL=false;
   const items=[]; let dirs=0, seen=0, denied=0, lastPaint=0;
   const queue=[{dh:dirHandle,path:dirHandle.name||''}];
   let active=0;
   const paint=()=>{ const now=Date.now(); if(now-lastPaint>150){ lastPaint=now;
-    setKmzStatus(`Crawling (parallel)&hellip; <b>${dirs}</b> folder(s) · <b>${seen}</b> item(s) · <b>${items.length}</b> KMZ/KML found${denied?` · <span style="color:var(--warn)">${denied} denied</span>`:''}`); } };
+    setKmzStatus(`Crawling (parallel)&hellip; <b>${dirs}</b> folder(s) · <b>${seen}</b> item(s) · <b>${items.length}</b> KMZ/KML found${denied?` · <span style="color:var(--warn)">${denied} denied</span>`:''}${KMZ_STOP_BTN}`); } };
   async function worker(){
     while(true){
+      if(KMZ_CANCEL){ queue.length=0; return; }
       const job=queue.pop();
       if(!job){ if(active===0) return; await new Promise(r=>setTimeout(r,12)); continue; }
       active++;
@@ -1268,6 +1275,7 @@ async function scanFolderModern(dirHandle){
         dirs++;
         let it; try{ it=job.dh.values(); }catch(e){ denied++; active--; continue; }
         while(true){
+          if(KMZ_CANCEL) break;
           let r; try{ r=await it.next(); }catch(e){ denied++; break; }
           if(r.done) break;
           const entry=r.value; seen++; paint();
@@ -1278,15 +1286,18 @@ async function scanFolderModern(dirHandle){
       } finally{ active--; }
     }
   }
-  setKmzStatus('Starting crawl&hellip;');
+  setKmzStatus('Starting crawl&hellip;'+KMZ_STOP_BTN);
   await Promise.all(Array.from({length:12},worker));
+  const stopped=KMZ_CANCEL;
   const deniedNote=denied?` · <span style="color:var(--warn)">${denied} unreadable/denied</span>`:'';
   if(!items.length){
-    setKmzStatus(`<b>Scan finished:</b> crawled ${dirs} folder(s), ${seen} item(s) &mdash; <b>no .kmz / .kml found</b>${deniedNote}. Check the folder level you picked.`);
+    setKmzStatus(stopped
+      ? `<b>Scan stopped.</b> ${dirs} folder(s) crawled &mdash; no .kmz / .kml found yet.`
+      : `<b>Scan finished:</b> crawled ${dirs} folder(s), ${seen} item(s) &mdash; <b>no .kmz / .kml found</b>${deniedNote}. Check the folder level you picked.`);
     return;
   }
-  setKmzStatus(`Crawl done: ${dirs} folder(s), ${seen} item(s)${deniedNote}. Reading ${items.length} KMZ/KML&hellip;`);
-  await processKmzItems(items);
+  setKmzStatus(`${stopped?'<b>Crawl stopped early</b> — keeping what was found. ':'Crawl done: '}${dirs} folder(s), ${seen} item(s)${deniedNote}. Reading ${items.length} KMZ/KML&hellip;${KMZ_STOP_BTN}`);
+  await processKmzItems(items, stopped);
 }
 
 /* Ranged KMZ read: a KMZ is a ZIP with the index at the END. Read the tail to
@@ -1335,19 +1346,27 @@ function setKmzStatus(html){
   const el=document.getElementById('kmzStatus'); if(!el) return;
   if(!html){ el.classList.add('hide'); el.innerHTML=''; return; }
   el.classList.remove('hide');
-  el.innerHTML=`<span style="float:right;cursor:pointer;color:var(--muted);font-weight:700;margin-left:10px" onclick="setKmzStatus('')" title="dismiss">&times;</span>${html}`;
+  el.innerHTML=`<span data-dismiss style="float:right;cursor:pointer;color:var(--muted);font-weight:700;margin-left:10px" title="dismiss">&times;</span>${html}`;
 }
+// delegated so Stop/dismiss clicks land even while the status re-renders during a scan
+document.addEventListener('click',e=>{
+  if(!e.target.closest||!e.target.closest('#kmzStatus')) return;
+  if(e.target.closest('[data-stop]')) cancelKmzScan();
+  else if(e.target.closest('[data-dismiss]')) setKmzStatus('');
+});
 function processKmzFiles(files){ // classic-picker path: wrap plain Files as items
   return processKmzItems([...files].map(f=>({name:f.name, path:f.webkitRelativePath||f.name, getFile:async()=>f})));
 }
-async function processKmzItems(items){
+async function processKmzItems(items, partialCrawl){
+  KMZ_CANCEL=false; // Stop during the read stage works independently of the crawl
   const locs=[], errs=[];
   let done=0, cachedHits=0, lastPaint=0;
   const paint=()=>{ const now=Date.now(); if(now-lastPaint>150){ lastPaint=now;
-    setKmzStatus(`Reading KMZ/KML&hellip; <b>${done} / ${items.length}</b>${cachedHits?` · <b>${cachedHits}</b> from cache (unchanged)`:''}`); } };
+    setKmzStatus(`Reading KMZ/KML&hellip; <b>${done} / ${items.length}</b>${cachedHits?` · <b>${cachedHits}</b> from cache (unchanged)`:''}${KMZ_STOP_BTN}`); } };
   const queue=items.slice();
   async function worker(){
     while(queue.length){
+      if(KMZ_CANCEL) return;
       const item=queue.pop(); if(!item) continue;
       try{
         const f=await item.getFile();
@@ -1375,11 +1394,13 @@ async function processKmzItems(items){
   }
   await Promise.all(Array.from({length:8},worker));
   persistKmzCache();
+  const stopped=KMZ_CANCEL||partialCrawl;
+  const label= stopped ? `${done} of ${items.length} (stopped early)` : items.length;
   if(!locs.length){
-    setKmzStatus(`<b>Scan finished:</b> ${items.length} KMZ/KML file(s) checked${cachedHits?` (${cachedHits} from cache)`:''}, but no usable locations found.${errs.length?` Problems: ${esc(errs.slice(0,3).join(' · '))}${errs.length>3?` (+${errs.length-3} more)`:''}`:''}`);
+    setKmzStatus(`<b>Scan ${stopped?'stopped':'finished'}:</b> ${label} KMZ/KML file(s) checked${cachedHits?` (${cachedHits} from cache)`:''}, but no usable locations found.${errs.length?` Problems: ${esc(errs.slice(0,3).join(' · '))}${errs.length>3?` (+${errs.length-3} more)`:''}`:''}`);
     return;
   }
-  openKmzReview(locs, errs, items.length);
+  openKmzReview(locs, errs, label);
 }
 let kmzRows=[];
 function openKmzReview(locs, errs, fileCount){
