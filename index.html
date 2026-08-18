@@ -4,6 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Route4Me Workaround</title>
+<!-- Leaflet (maps only — loads from unpkg/OpenStreetMap when online; everything else works offline) -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <style>
   :root{
     --bg:#f4f6f9; --panel:#ffffff; --ink:#1f2733; --muted:#6b7683;
@@ -89,6 +92,62 @@
   footer{color:var(--muted);font-size:12px;text-align:center;padding:20px}
   .split{display:grid;grid-template-columns:1fr 1fr;gap:18px}
   @media(max-width:760px){.split{grid-template-columns:1fr}}
+  /* ---- subs library grid (dispatch-style) ---- */
+  .subs-grid-head{display:grid;grid-template-columns:26px 1.6fr 1fr 1.6fr 150px 2fr 96px;gap:10px;align-items:center;
+    padding:6px 12px;background:#f8fafc;border:1px solid var(--line);border-radius:8px;font-size:10px;color:var(--muted);
+    text-transform:uppercase;letter-spacing:.08em;font-weight:600;margin-bottom:6px}
+  .sub-card2{display:grid;grid-template-columns:26px 1.6fr 1fr 1.6fr 150px 2fr 96px;gap:10px;align-items:center;
+    background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:7px 12px;margin-bottom:5px;font-size:13px;
+    box-shadow:var(--shadow);transition:border-color .08s}
+  .sub-card2:hover{border-color:#c3ccd8}
+  .sub-card2 input[type=text]{padding:5px 8px;font-size:12.5px}
+  .dot{width:9px;height:9px;border-radius:50%;display:inline-block}
+  .dot-green{background:var(--ok)} .dot-amber{background:var(--warn)}
+  .geo-cell{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:600;cursor:pointer;
+    font-variant-numeric:tabular-nums;border-radius:6px;padding:3px 6px}
+  .geo-cell.ok{color:var(--ok)} .geo-cell.no{color:var(--warn)}
+  .geo-cell:hover{background:var(--chip)}
+  .alias-wrap{display:flex;flex-wrap:wrap;gap:4px;align-items:center;min-height:24px}
+  .alias-chip{display:inline-flex;align-items:center;gap:4px;background:#eef6ff;color:#2563eb;font-size:10.5px;
+    padding:2px 4px 2px 8px;border-radius:10px;font-weight:500;max-width:190px}
+  .alias-chip span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .alias-chip button{background:transparent;border:none;color:#2563eb;cursor:pointer;padding:0 3px;opacity:.6;font-size:12px;line-height:1}
+  .alias-chip button:hover{opacity:1;color:var(--err)}
+  .alias-add{display:inline-flex;align-items:center;background:transparent;border:1px dashed #c3ccd8;color:var(--muted);
+    font-size:10.5px;padding:2px 8px;border-radius:10px;cursor:pointer}
+  .alias-add:hover{border-color:var(--brand);color:var(--brand)}
+  .alias-input{border:1px solid var(--brand);border-radius:10px;padding:2px 8px;font-size:10.5px;min-width:120px;outline:none}
+  .sub-actions2{display:flex;gap:4px;justify-content:flex-end}
+  .icon-btn{border:1px solid var(--line);background:var(--panel);border-radius:6px;width:26px;height:26px;display:inline-flex;
+    align-items:center;justify-content:center;cursor:pointer;font-size:13px;padding:0;color:#475467}
+  .icon-btn:hover{border-color:var(--brand);color:var(--brand);background:#f8fafc}
+  .icon-btn.danger:hover{border-color:var(--err);color:var(--err);background:var(--err-bg)}
+  #subsMapWrap{height:540px;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:#eaeaed}
+  /* ---- sub review cards (fuzzy import resolution) ---- */
+  .review-card{background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--warn);border-radius:8px;
+    padding:12px;margin-bottom:10px;font-size:13px}
+  .review-card.done{border-left-color:var(--ok);background:#f6fef9}
+  .review-head{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:8px}
+  .review-head .raw{font-weight:700;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px}
+  .review-head .meta{color:var(--muted);font-size:11.5px}
+  .review-label{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;font-weight:700;margin:8px 0 4px}
+  .review-sug{display:flex;align-items:center;gap:8px;padding:3px 0}
+  .review-sug .name{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .review-sug .score{color:var(--muted);font-size:10.5px;background:var(--chip);border-radius:10px;padding:1px 7px;font-variant-numeric:tabular-nums}
+  .review-sug .btns{margin-left:auto;display:flex;gap:5px;flex-shrink:0}
+  .sub-picker{position:relative}
+  .sub-picker-list{position:absolute;left:0;right:0;top:100%;margin-top:2px;background:var(--panel);border:1px solid #c3ccd8;
+    border-radius:8px;box-shadow:0 8px 24px rgba(16,24,40,.18);max-height:210px;overflow-y:auto;z-index:60;display:none}
+  .sub-picker-list.open{display:block}
+  .sub-picker-item{padding:6px 10px;font-size:12.5px;cursor:pointer;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:8px}
+  .sub-picker-item:last-child{border-bottom:none}
+  .sub-picker-item.active,.sub-picker-item:hover{background:#eef6ff;color:var(--brand)}
+  .sub-picker-item .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .sub-picker-alias{flex:none;font-size:10px;padding:2px 7px;border:1px solid var(--line);border-radius:4px;background:#f8fafc;color:#475467;cursor:pointer;font-weight:600}
+  .sub-picker-alias:hover{background:var(--brand);color:#fff;border-color:var(--brand)}
+  .sub-picker-empty{padding:8px 10px;font-size:11.5px;color:var(--muted);font-style:italic}
+  .review-create{display:grid;grid-template-columns:2fr 1fr 1fr auto;gap:6px;align-items:center}
+  @media(max-width:760px){.review-create{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
@@ -189,9 +248,10 @@
   <section id="tab-subs" class="hide">
     <div class="card">
       <h2>Subdivision library</h2>
-      <p class="help">The lat/long source. Matching order: exact name &rarr; alias &rarr; 25-char truncation. Aliases hold the shortened / misspelled forms your ERP produces.</p>
+      <p class="help">The lat/long source. Matching: exact name &rarr; alias &rarr; truncation &rarr; fuzzy suggestions on import. Edit everything inline; aliases hold the shortened / misspelled Sage forms.</p>
       <div class="toolbar">
-        <input type="search" class="grow" id="subSearch" placeholder="Search name or alias&hellip;">
+        <input type="search" class="grow" id="subSearch" placeholder="Filter name, nickname, address or alias&hellip;">
+        <button class="small" id="subsMapBtn">&#128205; Map</button>
         <button class="primary small" id="addSubBtn">+ Add subdivision</button>
         <button class="small" id="kmzBtn">Update from KMZ&hellip;</button>
         <input type="file" id="kmzFile" accept=".kmz,.kml" multiple class="hide">
@@ -202,12 +262,11 @@
         <input type="file" id="importSubs" accept=".json" class="hide">
         <button class="small danger" id="resetSubs">Reset to seed</button>
       </div>
-      <div class="tablewrap">
-        <table>
-          <thead><tr><th style="width:26%">Name</th><th>Aliases</th><th style="width:150px">Lat / Long</th><th style="width:90px"></th></tr></thead>
-          <tbody id="subBody"></tbody>
-        </table>
+      <div id="subsListWrap">
+        <div class="subs-grid-head"><div></div><div>Name</div><div>Nickname</div><div>Address</div><div>Lat / Long</div><div>Aliases</div><div style="text-align:right">Actions</div></div>
+        <div id="subsList" style="max-height:56vh;overflow-y:auto"></div>
       </div>
+      <div id="subsMapWrap" class="hide"></div>
       <p class="muted" id="subCount" style="margin:10px 2px 0"></p>
     </div>
   </section>
@@ -236,7 +295,7 @@
   </section>
 </main>
 
-<footer>Runs entirely in your browser. Nothing is uploaded. Libraries are saved locally on this computer.</footer>
+<footer>Runs entirely in your browser — your files are never uploaded. Libraries are saved locally on this computer. Only the map view fetches tiles (OpenStreetMap) and needs internet.</footer>
 
 <div id="modalRoot"></div>
 <div id="toast" class="toast"></div>
@@ -275,21 +334,82 @@ function buildIndex(){
   }
   return {byName,byAlias};
 }
+/* One-time raw->subName matches from the review popup ("Match" without alias).
+   Cleared whenever a new file01 is loaded — it's per-import-run, like dispatch. */
+const ONE_TIME_SUB=new Map();
+
 /* returns {sub, how} or {sub:null, how} */
 function matchSub(value, idx){
   const n=norm(value);
   if(!n) return {sub:null,how:'empty'};
   if(idx.byName.has(n)) return {sub:idx.byName.get(n),how:'name'};
   if(idx.byAlias.has(n)) return {sub:idx.byAlias.get(n),how:'alias'};
-  // truncation: library full name starts with the (shorter) ERP value
-  const cand=SUBS.filter(s=>norm(s.name).startsWith(n));
-  if(cand.length===1) return {sub:cand[0],how:'prefix'};
-  // alias truncation
-  const am=new Map();
-  for(const s of SUBS) for(const a of (s.aliases||[])) if(norm(a).startsWith(n)) am.set(s.name,s);
-  if(am.size===1) return {sub:[...am.values()][0],how:'aliasprefix'};
-  if(cand.length>1) return {sub:null,how:'ambiguous'};
+  if(ONE_TIME_SUB.has(n)){ const s=SUBS.find(x=>norm(x.name)===norm(ONE_TIME_SUB.get(n))); if(s) return {sub:s,how:'onetime'}; }
+  // Truncation-aware: Sage cuts "Subdiv Name" at a fixed column width, so a long
+  // library name arrives shortened. If the raw name is >=19 chars and the unique
+  // prefix of exactly one longer name (or alias), treat it as a truncation and
+  // SAVE it as an alias so the next import hits the exact fast path. The 19-char
+  // floor stops short shared prefixes ("Star Lake"/"Star Lake Estates") collapsing.
+  const raw0=String(value==null?'':value).trim();
+  if(raw0.length>=19){
+    const nameHits=SUBS.filter(s=>norm(s.name).length>n.length && norm(s.name).startsWith(n));
+    if(nameHits.length===1) return {sub:_saveTruncAlias(nameHits[0],raw0),how:'prefix'};
+    if(nameHits.length===0){
+      const am=new Map();
+      for(const s of SUBS) for(const a of (s.aliases||[])) if(norm(a).length>n.length && norm(a).startsWith(n)) am.set(s.name,s);
+      if(am.size===1) return {sub:_saveTruncAlias([...am.values()][0],raw0),how:'aliasprefix'};
+    }
+  }
   return {sub:null,how:'miss'};
+}
+function _saveTruncAlias(sub,raw0){
+  if(!Array.isArray(sub.aliases)) sub.aliases=[];
+  if(!sub.aliases.some(a=>norm(a)===norm(raw0))){ sub.aliases.push(raw0); persistSubs(); }
+  return sub;
+}
+
+/* ---- Jaro-Winkler fuzzy scoring (ported from the dispatch tool) ---- */
+function jaroWinkler(a,b){
+  if(!a||!b) return 0;
+  a=a.toLowerCase();b=b.toLowerCase();
+  if(a===b) return 1;
+  const al=a.length,bl=b.length;
+  const md=Math.max(0,Math.floor(Math.max(al,bl)/2)-1);
+  const am=new Array(al).fill(false),bm=new Array(bl).fill(false);
+  let matches=0;
+  for(let i=0;i<al;i++){
+    const lo=Math.max(0,i-md),hi=Math.min(bl,i+md+1);
+    for(let j=lo;j<hi;j++){
+      if(bm[j]||a[i]!==b[j])continue;
+      am[i]=bm[j]=true;matches++;break;
+    }
+  }
+  if(!matches)return 0;
+  let t=0,k=0;
+  for(let i=0;i<al;i++){
+    if(!am[i])continue;
+    while(!bm[k])k++;
+    if(a[i]!==b[k])t++;
+    k++;
+  }
+  t/=2;
+  const j=(matches/al+matches/bl+(matches-t)/matches)/3;
+  let prefix=0;
+  for(let i=0;i<Math.min(4,al,bl);i++){if(a[i]===b[i])prefix++;else break;}
+  return j+prefix*0.1*(1-j);
+}
+const FUZZY_THRESHOLD=0.80;
+/* Score a raw name against every sub name AND alias; sorted descending. */
+function scoreSubs(raw){
+  const out=[];
+  if(!raw) return out;
+  for(const s of SUBS){
+    let best=jaroWinkler(raw,s.name);
+    for(const a of (s.aliases||[])){ const sc=jaroWinkler(raw,a); if(sc>best) best=sc; }
+    out.push({name:s.name, score:best});
+  }
+  out.sort((a,b)=>b.score-a.score);
+  return out;
 }
 
 /* ============================ CSV ============================ */
@@ -364,7 +484,8 @@ function buildFile02(rows){
   }
   out.push(reshape(header, LAT_H, LNG_H, DEPOT_H)); // header row (orig specs yield padded header names)
 
-  const unmatched=new Map(); // erpName -> {count, sampleRowIdx}
+  const unmatched=new Map(); // erpName -> {count}
+  const noCoords=new Map();  // matched sub name -> count (sub exists but has no lat/long yet)
   let matched=0, jobs=0;
   for(let r=1;r<rows.length;r++){
     const cells=rows[r];
@@ -372,7 +493,11 @@ function buildFile02(rows){
     const subVal=cells[iSub]!=null?cells[iSub]:'';
     const m=matchSub(subVal, idx);
     let lat='', lng='';
-    if(m.sub){ lat=fmtCoord(m.sub.lat); lng=fmtCoord(m.sub.lng); matched++; }
+    if(m.sub){
+      const hasCoords = m.sub.lat!=null && m.sub.lat!=='' && m.sub.lng!=null && m.sub.lng!=='';
+      if(hasCoords){ lat=fmtCoord(m.sub.lat); lng=fmtCoord(m.sub.lng); matched++; }
+      else noCoords.set(m.sub.name,(noCoords.get(m.sub.name)||0)+1);
+    }
     else{
       const key=String(subVal).trim();
       const rec=unmatched.get(key)||{count:0};
@@ -390,7 +515,7 @@ function buildFile02(rows){
   }
 
   const outName=`Route4Me Upload ${todayStamp()}.csv`;
-  return {rows:out, outName, unmatched, matched, jobs, depots:activeCrews.length};
+  return {rows:out, outName, unmatched, noCoords, matched, jobs, depots:activeCrews.length};
 }
 function isActive(cw){ return cw.active!==false; } // default on unless explicitly false
 function todayStamp(){ const d=new Date(); const p=n=>String(n).padStart(2,'0'); return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`; }
@@ -416,6 +541,7 @@ function loadFile01ForReview(text,name){
   jobsHeader=rows[0];
   jobsRows=rows.slice(1).map((cells,i)=>({cells,id:i,removed:false}));
   jobsSel=new Set(); jobsAnchor=null; jobsSort={i:null,dir:1};
+  ONE_TIME_SUB.clear();   // one-time sub matches are per-import-run
   // display columns (by header name; skipped silently if absent)
   const want=[['Svc Job Num','text'],['Received Date','date'],['Schedule_Date','date'],
     ['Description Of Problem','text'],['Status Code','text'],['Priority','text'],
@@ -517,16 +643,23 @@ function renderResult(res){
     <div><b>${res.unmatched.size}</b>unmatched</div>
     <div><b>${res.depots}</b>active depots</div>`;
   const warn=document.getElementById('warnBox');
+  const blocks=[];
   if(res.unmatched.size){
     const names=[...res.unmatched.keys()].map(k=>`<span class="chip">${esc(k||'(blank)')}</span>`).join('');
-    warn.innerHTML=`<div class="unmatched"><span class="badge warn">Needs attention</span>
-      <div style="margin-top:8px">${res.unmatched.size} subdivision(s) not in your library &mdash; these job rows will have <b>blank coordinates</b> until you add them:</div>
-      <div style="margin-top:8px">${names}</div></div>`;
+    blocks.push(`<div class="unmatched"><span class="badge warn">Needs attention</span>
+      <div style="margin-top:8px">${res.unmatched.size} subdivision(s) not in your library &mdash; these job rows will have <b>blank coordinates</b> until you resolve them:</div>
+      <div style="margin-top:8px">${names}</div></div>`);
     document.getElementById('reviewUnmatchedBtn').classList.remove('hide');
   }else{
-    warn.innerHTML=`<div class="note">All subdivisions matched. Ready to upload to Route4Me.</div>`;
     document.getElementById('reviewUnmatchedBtn').classList.add('hide');
   }
+  if(res.noCoords && res.noCoords.size){
+    const names=[...res.noCoords].map(([k,n])=>`<span class="chip">${esc(k)} &times;${n}</span>`).join('');
+    blocks.push(`<div class="unmatched"><span class="badge warn">No coordinates yet</span>
+      <div style="margin-top:8px">These subs are in your library but have <b>no lat/long</b> &mdash; set them on the Subdivisions tab (inline, or via KMZ) and re-convert:</div>
+      <div style="margin-top:8px">${names}</div></div>`);
+  }
+  warn.innerHTML = blocks.length ? blocks.join('') : `<div class="note">All subdivisions matched. Ready to upload to Route4Me.</div>`;
   document.getElementById('outName').textContent='will save as: '+res.outName;
 }
 
@@ -676,86 +809,267 @@ function setFile01(text,name,fromStash){
   document.getElementById('f1status').innerHTML = `<b>file01:</b> ${esc(name)} &middot; ${rows} job rows${fromStash?' <span class="muted">(from your last Send)</span>':''}`;
 }
 
-/* ============================ UNMATCHED MODAL ============================ */
+/* ============================ SUB RESOLUTION MODAL (fuzzy review cards) ============================ */
 function openUnmatchedModal(unmatched, onResolvedRerun){
-  const items=[...unmatched.entries()];
+  const entries=[...unmatched.entries()].map(([raw,info],i)=>({raw,count:info.count,i,resolved:null}));
   const root=document.getElementById('modalRoot');
   root.innerHTML=`
   <div class="backdrop">
-    <div class="modal">
-      <div class="mh"><h3>${items.length} subdivision(s) not in your library</h3>
-        <div class="muted" style="font-size:13px;margin-top:4px">Add coordinates for each, or skip and convert with blanks. New entries are saved to your library (the ERP spelling is stored as an alias).</div></div>
-      <div class="mb" id="umBody">
-        ${items.map((it,i)=>umRow(it[0],it[1].count,i)).join('')}
-      </div>
+    <div class="modal" style="max-width:760px">
+      <div class="mh"><h3>Sub resolution &mdash; ${entries.length} name(s) need review</h3>
+        <div class="muted" style="font-size:13px;margin-top:4px"><b>Match</b> routes this import only &middot; <b>Match + alias</b> also saves the spelling so future imports auto-resolve &middot; or pick any sub / create new.</div></div>
+      <div class="mb" id="umBody"></div>
       <div class="mf">
         <button id="umSkip">Convert with blanks</button>
-        <button class="primary" id="umDone" disabled>Save &amp; re-convert</button>
+        <button class="primary" id="umDone" disabled>Re-convert</button>
       </div>
     </div>
   </div>`;
-  const remaining=new Set(items.map((_,i)=>i));
-  function refreshDone(){ document.getElementById('umDone').disabled = remaining.size>0 ? false : false; }
-  // enable "Save & re-convert" whenever at least one saved; else stays enabled but does nothing new
-  document.getElementById('umDone').disabled=true;
-  root.querySelectorAll('[data-save]').forEach(btn=>{
-    btn.addEventListener('click',()=>{
-      const i=+btn.dataset.save;
-      const name=items[i][0];
-      const lat=root.querySelector(`[data-lat="${i}"]`).value.trim();
-      const lng=root.querySelector(`[data-lng="${i}"]`).value.trim();
-      const canon=root.querySelector(`[data-canon="${i}"]`).value.trim()||name;
-      if(!isFinite(+lat)||!isFinite(+lng)||lat===''||lng===''){ showToast('Enter valid lat & long'); return; }
-      // find existing sub by canonical name, else create
-      let sub=SUBS.find(s=>norm(s.name)===norm(canon));
-      if(sub){
-        if(norm(canon)!==norm(name) && !(sub.aliases||[]).some(a=>norm(a)===norm(name))){ (sub.aliases=sub.aliases||[]).push(name); }
-        sub.lat=+lat; sub.lng=+lng;
-      }else{
-        const aliases = norm(canon)!==norm(name) ? [name] : [];
-        SUBS.push({name:canon,address:'',lat:+lat,lng:+lng,aliases});
-      }
+  const body=root.querySelector('#umBody');
+  let resolvedN=0;
+  const markResolved=(entry,subName,how)=>{
+    entry.resolved=subName; resolvedN++;
+    const card=body.querySelector(`[data-card="${entry.i}"]`);
+    if(card){ card.classList.add('done');
+      card.innerHTML=`<div class="review-head"><span class="raw">${esc(entry.raw)}</span>
+        <span class="meta">&rarr; <b>${esc(subName)}</b> ${how==='alias'?'(alias saved)':how==='create'?'(new sub)':'(this import only)'}</span>
+        <span class="badge ok" style="margin-left:auto">resolved</span></div>`; }
+    document.getElementById('umDone').disabled = resolvedN===0;
+  };
+  const doMatch=(entry,subName,withAlias)=>{
+    const s=SUBS.find(x=>norm(x.name)===norm(subName));
+    if(!s){ showToast('Sub not found'); return; }
+    if(withAlias){
+      if(!Array.isArray(s.aliases)) s.aliases=[];
+      if(!s.aliases.some(a=>norm(a)===norm(entry.raw))) s.aliases.push(entry.raw);
       persistSubs();
-      btn.textContent='Saved'; btn.disabled=true;
-      root.querySelector(`[data-lat="${i}"]`).disabled=true;
-      root.querySelector(`[data-lng="${i}"]`).disabled=true;
-      root.querySelector(`[data-canon="${i}"]`).disabled=true;
-      document.getElementById('umDone').disabled=false;
+    } else {
+      ONE_TIME_SUB.set(norm(entry.raw), s.name);
+    }
+    markResolved(entry,s.name,withAlias?'alias':'once');
+  };
+  for(const entry of entries){
+    const card=document.createElement('div');
+    card.className='review-card'; card.dataset.card=entry.i;
+    const sugs=scoreSubs(entry.raw).filter(c=>c.score>=FUZZY_THRESHOLD).slice(0,3);
+    const sugHtml = sugs.length
+      ? `<div class="review-label">Suggestions</div>`+sugs.map(c=>`
+          <div class="review-sug"><span class="name">${esc(c.name)}</span><span class="score">${c.score.toFixed(2)}</span>
+            <span class="btns"><button class="small primary" data-m="${esc(c.name)}">Match</button>
+            <button class="small" data-ma="${esc(c.name)}">Match + alias</button></span></div>`).join('')
+      : `<div class="muted" style="font-size:12px;font-style:italic;padding:2px 0 4px">No close matches &mdash; pick below or create a new sub.</div>`;
+    card.innerHTML=`
+      <div class="review-head"><span class="raw">${esc(entry.raw||'(blank)')}</span>
+        <span class="meta"><b>${entry.count}</b> job row${entry.count===1?'':'s'}</span></div>
+      ${sugHtml}
+      <div class="review-label">&mdash; or pick any existing sub (type to filter)</div>
+      <div class="sub-picker" data-picker></div>
+      <div class="review-label">&mdash; or create a new sub (lat/long optional; set later via KMZ or the map/library)</div>
+      <div class="review-create">
+        <input type="text" data-new-name placeholder="sub name" value="${esc(entry.raw)}">
+        <input type="number" step="any" data-new-lat placeholder="lat">
+        <input type="number" step="any" data-new-lng placeholder="long">
+        <button class="primary small" data-create>Create</button>
+      </div>`;
+    body.appendChild(card);
+    mountSubPicker(card.querySelector('[data-picker]'), (name,opts)=>doMatch(entry,name,!!(opts&&opts.alias)));
+    card.addEventListener('click',e=>{
+      const m=e.target.closest('[data-m]'), ma=e.target.closest('[data-ma]'), cr=e.target.closest('[data-create]');
+      if(m) doMatch(entry,m.dataset.m,false);
+      else if(ma) doMatch(entry,ma.dataset.ma,true);
+      else if(cr){
+        const name=card.querySelector('[data-new-name]').value.trim();
+        if(!name){ showToast('Need a name'); return; }
+        const latS=card.querySelector('[data-new-lat]').value.trim(), lngS=card.querySelector('[data-new-lng]').value.trim();
+        const lat=latS===''?null:+latS, lng=lngS===''?null:+lngS;
+        if((latS!==''&&!isFinite(lat))||(lngS!==''&&!isFinite(lng))){ showToast('Bad lat/long'); return; }
+        const existing=SUBS.find(s=>norm(s.name)===norm(name));
+        if(existing){ // collision: treat as match(+alias if spelled differently)
+          if(lat!=null&&lng!=null){ existing.lat=lat; existing.lng=lng; }
+          doMatch(entry,existing.name, norm(name)!==norm(entry.raw));
+          persistSubs(); return;
+        }
+        const aliases = norm(name)!==norm(entry.raw)&&entry.raw ? [entry.raw] : [];
+        SUBS.push({name,nickname:'',address:'',lat,lng,aliases});
+        persistSubs();
+        markResolved(entry,name,'create');
+      }
     });
-  });
-  document.getElementById('umSkip').addEventListener('click',()=>{ root.innerHTML=''; showToast('Converted with blank coordinates for unmatched rows'); });
-  document.getElementById('umDone').addEventListener('click',()=>{ root.innerHTML=''; renderSubs(); onResolvedRerun(); showToast('Library updated & re-converted'); });
-}
-function umRow(name,count,i){
-  return `<div class="unmatched">
-    <div class="nm">${esc(name||'(blank)')}</div>
-    <div class="cnt">${count} job row(s)</div>
-    <div style="margin-top:8px"><label class="fld">Save under library name (edit if this is a truncation/misspelling of an existing sub)</label>
-      <input type="text" data-canon="${i}" value="${esc(name)}"></div>
-    <div class="grid3">
-      <div><label class="fld">Latitude</label><input type="number" step="any" data-lat="${i}" placeholder="28.1234"></div>
-      <div><label class="fld">Longitude</label><input type="number" step="any" data-lng="${i}" placeholder="-81.5678"></div>
-      <div><button class="primary" data-save="${i}">Save</button></div>
-    </div>
-  </div>`;
+  }
+  document.getElementById('umSkip').addEventListener('click',()=>{ root.innerHTML=''; showToast('Converted with blank coordinates for unresolved rows'); });
+  document.getElementById('umDone').addEventListener('click',()=>{ root.innerHTML=''; renderSubs(); onResolvedRerun(); showToast('Re-converted with your matches'); });
 }
 
-/* ============================ SUBS TABLE ============================ */
-function renderSubs(){
+/* Filter-as-you-type combo over all subs (names, nicknames, aliases). Ported from dispatch. */
+function mountSubPicker(host,onPick){
+  host.innerHTML='';
+  const input=document.createElement('input');
+  input.type='text'; input.placeholder='type to filter subs · "+ alias" also saves this spelling';
+  const list=document.createElement('div'); list.className='sub-picker-list';
+  host.appendChild(input); host.appendChild(list);
+  let activeIdx=-1, matches=[];
+  const render=()=>{
+    const q=norm(input.value);
+    matches=SUBS.filter(s=>{
+      if(!q) return true;
+      if(norm(s.name).includes(q)) return true;
+      if(norm(s.nickname||'').includes(q)) return true;
+      return (s.aliases||[]).some(a=>norm(a).includes(q));
+    }).slice(0,50);
+    if(!matches.length){ list.innerHTML=`<div class="sub-picker-empty">${SUBS.length?'no matches':'no subs yet'}</div>`; list.classList.add('open'); return; }
+    list.innerHTML=matches.map((s,i)=>`<div class="sub-picker-item${i===activeIdx?' active':''}" data-idx="${i}">
+      <span class="nm">${esc(s.name)}${(s.aliases||[]).length?` <span class="muted" style="font-size:10.5px">(${esc(s.aliases.join(', '))})</span>`:''}</span>
+      <button type="button" class="sub-picker-alias" data-aidx="${i}" title="match AND save the raw spelling as an alias">+ alias</button></div>`).join('');
+    list.classList.add('open');
+  };
+  const close=()=>{ list.classList.remove('open'); activeIdx=-1; };
+  const pick=(idx,withAlias)=>{ const s=matches[idx]; if(!s) return; close(); onPick(s.name, withAlias?{alias:true}:undefined); };
+  input.addEventListener('focus',render);
+  input.addEventListener('input',()=>{ activeIdx=-1; render(); });
+  input.addEventListener('keydown',e=>{
+    if(!list.classList.contains('open')) return;
+    if(e.key==='ArrowDown'){ e.preventDefault(); activeIdx=Math.min(matches.length-1,activeIdx+1); render(); }
+    else if(e.key==='ArrowUp'){ e.preventDefault(); activeIdx=Math.max(0,activeIdx-1); render(); }
+    else if(e.key==='Enter'){ e.preventDefault(); pick(activeIdx>=0?activeIdx:0, e.shiftKey); }
+    else if(e.key==='Escape'){ e.preventDefault(); close(); input.blur(); }
+  });
+  list.addEventListener('mousedown',e=>{
+    const ab=e.target.closest('[data-aidx]');
+    if(ab){ e.preventDefault(); e.stopPropagation(); pick(+ab.dataset.aidx,true); return; }
+    const it=e.target.closest('[data-idx]');
+    if(!it) return; e.preventDefault(); pick(+it.dataset.idx,false);
+  });
+  input.addEventListener('blur',()=>setTimeout(close,120));
+}
+
+/* ============================ SUBS LIBRARY (inline grid, dispatch-style) ============================ */
+function subHasGeo(s){ return s.lat!=null&&s.lat!==''&&s.lng!=null&&s.lng!==''; }
+function subsFilterList(){
   const q=norm(document.getElementById('subSearch').value);
-  const body=document.getElementById('subBody');
   const list=SUBS.map((s,i)=>({s,i}))
-    .filter(({s})=>!q || norm(s.name).includes(q) || (s.aliases||[]).some(a=>norm(a).includes(q)))
+    .filter(({s})=>!q || norm(s.name).includes(q) || norm(s.nickname||'').includes(q)
+      || norm(s.address||'').includes(q) || (s.aliases||[]).some(a=>norm(a).includes(q)))
     .sort((a,b)=>a.s.name.localeCompare(b.s.name));
-  body.innerHTML=list.map(({s,i})=>`
-    <tr>
-      <td><b>${esc(s.name)}</b>${s.address?`<div class="muted" style="font-size:11px">${esc(s.address)}</div>`:''}</td>
-      <td>${(s.aliases||[]).map((a,ai)=>`<span class="chip">${esc(a)}<span class="x" data-delalias="${i}" data-ai="${ai}">&times;</span></span>`).join('')||'<span class="muted">&mdash;</span>'}
-          <span class="chip" style="cursor:pointer;background:#eef6ff;color:#2563eb" data-addalias="${i}">+ alias</span></td>
-      <td class="pin">${fmtCoord(s.lat)}<br>${fmtCoord(s.lng)}</td>
-      <td><button class="small" data-editsub="${i}">Edit</button> <button class="small danger" data-delsub="${i}">Del</button></td>
-    </tr>`).join('');
-  document.getElementById('subCount').textContent=`${SUBS.length} subdivisions${q?` (${list.length} shown)`:''}`;
+  return {list, filtered:!!q};
+}
+function renderSubs(){
+  const body=document.getElementById('subsList');
+  const {list}=subsFilterList();
+  body.innerHTML=list.map(({s,i})=>{
+    const geo=subHasGeo(s);
+    return `<div class="sub-card2" data-i="${i}">
+      <div style="display:flex;justify-content:center"><span class="dot ${geo?'dot-green':'dot-amber'}" title="${geo?'has coordinates':'no coordinates yet'}"></span></div>
+      <input type="text" value="${esc(s.name)}" data-f="name" data-i="${i}" title="rename">
+      <input type="text" value="${esc(s.nickname||'')}" data-f="nickname" data-i="${i}" placeholder="nickname&hellip;">
+      <input type="text" value="${esc(s.address||'')}" data-f="address" data-i="${i}" placeholder="address (reference only)&hellip;">
+      <div class="geo-cell ${geo?'ok':'no'}" data-geo="${i}" title="click to set / edit coordinates">
+        ${geo?`${(+s.lat).toFixed(4)}<br>${(+s.lng).toFixed(4)}`:'no geo — set'}
+      </div>
+      <div class="alias-wrap">
+        ${(s.aliases||[]).map((a,ai)=>`<span class="alias-chip"><span>${esc(a)}</span><button data-adel="${i}" data-ai="${ai}" title="remove alias">&times;</button></span>`).join('')}
+        <button class="alias-add" data-aadd="${i}">+ alias</button>
+      </div>
+      <div class="sub-actions2">
+        ${geo?`<button class="icon-btn" data-map="${i}" title="show on map">&#128205;</button>`:''}
+        <button class="icon-btn danger" data-del="${i}" title="delete sub">&#128465;</button>
+      </div>
+    </div>`;}).join('') || `<div class="muted" style="text-align:center;padding:36px">${SUBS.length?'no subs match the filter':'no subs yet — add one or import'}</div>`;
+  const withGeo=SUBS.filter(subHasGeo).length;
+  document.getElementById('subCount').textContent=`${SUBS.length} subdivisions · ${withGeo} with coordinates${SUBS.length-withGeo?` · ${SUBS.length-withGeo} without`:''}`;
+  renderSubsMap(false); // keep map in step when it's open
+}
+
+/* small modal: set/edit one sub's coordinates by pasting "lat, long" */
+function openGeoEditor(i){
+  const s=SUBS[i]; if(!s) return;
+  const root=document.getElementById('modalRoot');
+  const cur=subHasGeo(s)?`${s.lat}, ${s.lng}`:'';
+  root.innerHTML=`<div class="backdrop"><div class="modal" style="max-width:440px">
+    <div class="mh"><h3>Coordinates &mdash; ${esc(s.name)}</h3></div>
+    <div class="mb">
+      <label class="fld">Paste "lat, long" (e.g. from Google Maps right-click &rarr; copy)</label>
+      <input type="text" id="geo_pair" value="${esc(cur)}" placeholder="28.187693, -81.553468">
+      <div class="muted" style="font-size:11px;margin-top:6px">Leave empty and save to clear the coordinates.</div>
+    </div>
+    <div class="mf"><button id="geo_cancel">Cancel</button><button class="primary" id="geo_save">Save</button></div>
+  </div></div>`;
+  const inp=document.getElementById('geo_pair'); inp.focus(); inp.select();
+  document.getElementById('geo_cancel').onclick=()=>root.innerHTML='';
+  const commit=()=>{
+    const v=inp.value.trim();
+    if(!v){ s.lat=null; s.lng=null; persistSubs(); root.innerHTML=''; renderSubs(); showToast('Coordinates cleared'); return; }
+    const m=v.match(/^\s*(-?\d+(?:\.\d+)?)\s*[,;\s]\s*(-?\d+(?:\.\d+)?)\s*$/);
+    if(!m){ showToast('Could not read that — paste like "28.1876, -81.5534"'); return; }
+    s.lat=+m[1]; s.lng=+m[2];
+    persistSubs(); root.innerHTML=''; renderSubs(); showToast('Coordinates set');
+  };
+  document.getElementById('geo_save').onclick=commit;
+  inp.addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); commit(); } });
+}
+
+/* ============================ SUBS MAP (Leaflet — all subs + per-sub focus) ============================ */
+let subsMapInstance=null, subsMapLayer=null, subsMapInfoEl=null, _subsMapLastFilter=null, pendingSubFocus=null, _focusPin=null;
+function mapAvailable(){ return typeof L!=='undefined'; }
+function toggleSubsMap(force){
+  const mapWrap=document.getElementById('subsMapWrap'), listWrap=document.getElementById('subsListWrap'), btn=document.getElementById('subsMapBtn');
+  const show = force!==undefined ? force : mapWrap.classList.contains('hide');
+  if(show && !mapAvailable()){ showToast('Map needs internet (Leaflet + OpenStreetMap tiles) — reconnect and reload'); return; }
+  mapWrap.classList.toggle('hide',!show);
+  listWrap.classList.toggle('hide',show);
+  btn.classList.toggle('primary',show);
+  if(show) renderSubsMap(true);
+}
+function renderSubsMap(fit){
+  const wrap=document.getElementById('subsMapWrap');
+  if(!wrap||wrap.classList.contains('hide')||!mapAvailable()) return;
+  if(!subsMapInstance){
+    subsMapInstance=L.map('subsMapWrap',{zoomControl:true,zoomDelta:0.5,zoomSnap:0.5}).setView([28.5,-81.4],8);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'© OpenStreetMap',maxZoom:19}).addTo(subsMapInstance);
+    subsMapLayer=L.layerGroup().addTo(subsMapInstance);
+    const info=L.control({position:'topright'});
+    info.onAdd=()=>{ subsMapInfoEl=L.DomUtil.create('div');
+      subsMapInfoEl.style.cssText='background:rgba(255,255,255,.93);border:1px solid #d1d1d6;border-radius:6px;padding:5px 9px;font-size:11px;color:#3f3f46;box-shadow:0 1px 4px rgba(0,0,0,.15);line-height:1.5';
+      return subsMapInfoEl; };
+    info.addTo(subsMapInstance);
+  }
+  setTimeout(()=>subsMapInstance.invalidateSize(),50);
+  subsMapLayer.clearLayers();
+  const {list,filtered}=subsFilterList();
+  const curFilter=norm(document.getElementById('subSearch').value);
+  if(_subsMapLastFilter!==null && curFilter!==_subsMapLastFilter) fit=true;
+  _subsMapLastFilter=curFilter;
+  const located=list.filter(({s})=>subHasGeo(s));
+  const missing=list.length-located.length;
+  const pts=[];
+  for(const {s,i} of located){
+    const m=L.circleMarker([+s.lat,+s.lng],{radius:7,color:'#fff',weight:1.5,fillColor:'#2563eb',fillOpacity:.92});
+    m.bindTooltip(esc(s.name),{direction:'top',offset:[0,-6]});
+    m.bindPopup(`<div style="min-width:180px">
+      <div style="font-weight:700;font-size:12.5px">${esc(s.name)}</div>
+      ${s.nickname?`<div style="font-size:11px;color:#6b6b73">&ldquo;${esc(s.nickname)}&rdquo;</div>`:''}
+      ${s.address?`<div style="font-size:11px;color:#6b6b73;margin-top:2px">${esc(s.address)}</div>`:''}
+      <div style="font-size:11px;color:#6b6b73;margin-top:3px;font-variant-numeric:tabular-nums">${(+s.lat).toFixed(6)}, ${(+s.lng).toFixed(6)}</div>
+    </div>`);
+    subsMapLayer.addLayer(m);
+    pts.push([+s.lat,+s.lng]);
+  }
+  if(subsMapInfoEl) subsMapInfoEl.innerHTML=`<b>${located.length}</b> sub${located.length===1?'':'s'} shown${filtered?' (filtered)':''}${missing?` · <span style="color:#d97706">${missing} without coordinates</span>`:''}`;
+  if(pendingSubFocus){
+    const p=pendingSubFocus; pendingSubFocus=null;
+    setTimeout(()=>{
+      subsMapInstance.setView([p.lat,p.lng],15);
+      if(_focusPin){ _focusPin.remove(); _focusPin=null; }
+      _focusPin=L.marker([p.lat,p.lng]).addTo(subsMapInstance).bindTooltip(esc(p.name),{permanent:false});
+      const check=()=>{ if(_focusPin && subsMapInstance.getZoom()<=13){ _focusPin.remove(); _focusPin=null; subsMapInstance.off('zoomend',check); } };
+      subsMapInstance.on('zoomend',check);
+    },80);
+  } else if(fit&&pts.length) subsMapInstance.fitBounds(pts,{padding:[40,40]});
+}
+function focusSubOnMap(i){
+  const s=SUBS[i]; if(!s||!subHasGeo(s)) return;
+  if(!mapAvailable()){ showToast('Map needs internet (Leaflet + OpenStreetMap tiles)'); return; }
+  pendingSubFocus={lat:+s.lat,lng:+s.lng,name:s.name};
+  toggleSubsMap(true);
 }
 
 /* ============================ CREWS TABLE ============================ */
@@ -781,17 +1095,20 @@ function renderCrews(){
 /* ============================ EDIT MODALS ============================ */
 function editSubModal(i){
   const isNew=i<0;
-  const s=isNew?{name:'',address:'',lat:'',lng:'',aliases:[]}:SUBS[i];
+  const s=isNew?{name:'',nickname:'',address:'',lat:'',lng:'',aliases:[]}:SUBS[i];
   const root=document.getElementById('modalRoot');
   root.innerHTML=`<div class="backdrop"><div class="modal"><div class="mh"><h3>${isNew?'Add':'Edit'} subdivision</h3></div>
     <div class="mb">
-      <div style="margin-bottom:12px"><label class="fld">Name</label><input type="text" id="e_name" value="${esc(s.name)}"></div>
-      <div style="margin-bottom:12px"><label class="fld">Address (optional)</label><input type="text" id="e_addr" value="${esc(s.address||'')}"></div>
       <div class="split" style="margin-bottom:12px">
-        <div><label class="fld">Latitude</label><input type="number" step="any" id="e_lat" value="${s.lat}"></div>
-        <div><label class="fld">Longitude</label><input type="number" step="any" id="e_lng" value="${s.lng}"></div>
+        <div><label class="fld">Name</label><input type="text" id="e_name" value="${esc(s.name)}"></div>
+        <div><label class="fld">Nickname (optional)</label><input type="text" id="e_nick" value="${esc(s.nickname||'')}"></div>
       </div>
-      <div><label class="fld">Aliases (one per line &mdash; the shortened/misspelled ERP forms)</label>
+      <div style="margin-bottom:12px"><label class="fld">Address (optional, reference only &mdash; never geocoded)</label><input type="text" id="e_addr" value="${esc(s.address||'')}"></div>
+      <div class="split" style="margin-bottom:12px">
+        <div><label class="fld">Latitude (optional &mdash; can come from KMZ later)</label><input type="number" step="any" id="e_lat" value="${s.lat==null?'':s.lat}"></div>
+        <div><label class="fld">Longitude</label><input type="number" step="any" id="e_lng" value="${s.lng==null?'':s.lng}"></div>
+      </div>
+      <div><label class="fld">Aliases (one per line &mdash; the shortened/misspelled Sage forms)</label>
         <textarea id="e_aliases" style="width:100%;min-height:90px;font:inherit;padding:8px 10px;border:1px solid var(--line);border-radius:8px">${esc((s.aliases||[]).join('\n'))}</textarea></div>
     </div>
     <div class="mf"><button id="e_cancel">Cancel</button><button class="primary" id="e_save">Save</button></div>
@@ -802,8 +1119,10 @@ function editSubModal(i){
     const lat=document.getElementById('e_lat').value.trim();
     const lng=document.getElementById('e_lng').value.trim();
     if(!name){ showToast('Name is required'); return; }
-    if(lat===''||lng===''||!isFinite(+lat)||!isFinite(+lng)){ showToast('Valid lat & long required'); return; }
-    const rec={name,address:document.getElementById('e_addr').value.trim(),lat:+lat,lng:+lng,
+    if((lat==='')!==(lng==='')){ showToast('Enter both lat & long, or neither'); return; }
+    if(lat!==''&&(!isFinite(+lat)||!isFinite(+lng))){ showToast('Valid lat & long required'); return; }
+    const rec={name,nickname:document.getElementById('e_nick').value.trim(),address:document.getElementById('e_addr').value.trim(),
+      lat:lat===''?null:+lat,lng:lng===''?null:+lng,
       aliases:document.getElementById('e_aliases').value.split('\n').map(x=>x.trim()).filter(Boolean)};
     if(isNew) SUBS.push(rec); else SUBS[i]=rec;
     persistSubs(); root.innerHTML=''; renderSubs(); showToast('Saved');
@@ -924,40 +1243,67 @@ async function processKmzFiles(files){
 let kmzRows=[];
 function openKmzReview(locs, errs){
   const idx=buildIndex();
-  kmzRows=locs.map((L,i)=>{
+  const all=locs.map((L,i)=>{
     const m=matchSubForKmz(L.name, idx), sub=m.sub;
-    const hasCoord = sub && sub.lat!=null&&sub.lat!==''&&sub.lng!=null&&sub.lng!=='';
+    const hasCoord = sub && subHasGeo(sub);
     const status = !sub ? 'new' : (hasCoord ? 'exists' : 'fill');
     return {...L, i, subName: sub?sub.name:null, status, apply: status!=='exists', newName: stripPhase(L.name)};
   });
-  const badge=s=> s==='new'?'<span class="badge ok">new</span>' : s==='fill'?'<span class="badge warn">fill blank</span>' : '<span class="badge">has coords</span>';
-  const rowHtml=r=>`<tr>
-    <td><input type="checkbox" data-kzapply="${r.i}" ${r.apply?'checked':''}></td>
-    <td>${r.status==='new'
-        ? `<input type="text" data-kzname="${r.i}" value="${esc(r.newName)}" style="width:100%">`
-        : `<b>${esc(r.subName)}</b>`}
-      <div class="muted" style="font-size:11px">KMZ: ${esc(r.name)} · ${esc(r.src)}</div></td>
-    <td>${badge(r.status)}</td>
-    <td class="pin">${r.status==='exists' ? `<span class="muted">${fmtCoord(kmzSub(r).lat)}, ${fmtCoord(kmzSub(r).lng)}</span>` : '&mdash;'}</td>
-    <td class="pin">${rnd(r.lat)}, ${rnd(r.lng)}</td>
-  </tr>`;
+  // dedupe by resolved identity: same sub (or same new name) from multiple sheets -> one card
+  const seen=new Set();
+  kmzRows=[];
+  let skipped=0;
+  for(const r of all){
+    const key = r.subName ? 'sub:'+norm(r.subName) : 'new:'+norm(r.newName);
+    if(r.status==='exists'){ if(!seen.has(key)){ seen.add(key); skipped++; } continue; }  // already in library -> skip
+    if(seen.has(key)) continue;
+    seen.add(key);
+    kmzRows.push(r);
+  }
   const root=document.getElementById('modalRoot');
-  root.innerHTML=`<div class="backdrop"><div class="modal" style="max-width:820px"><div class="mh"><h3>Update library from KMZ</h3>
-      <div class="muted" style="font-size:13px;margin-top:4px">${kmzRows.length} location(s) found. New subs and blank ones are checked by default; check a “has coords” row only if you want to overwrite it.</div>
+  if(!kmzRows.length){
+    root.innerHTML='';
+    showToast(`Scan done — ${skipped} sub${skipped===1?'':'s'} already in the library, nothing new to add${errs.length?` (${errs.length} file(s) unreadable)`:''}`);
+    return;
+  }
+  const cardHtml=(r,k)=>`<div class="review-card" data-kz="${r.i}">
+    <div class="review-head">
+      ${r.status==='new'
+        ? `<span class="badge ok">new sub</span><input type="text" data-kzname="${r.i}" value="${esc(r.newName)}" style="flex:1;min-width:200px;font-weight:700">`
+        : `<span class="badge warn">fill blank</span><span class="raw">${esc(r.subName)}</span>`}
+      <label style="margin-left:auto;display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
+        <input type="checkbox" data-kzapply="${r.i}" ${r.apply?'checked':''}> ${r.status==='new'?'create':'fill'}</label>
+    </div>
+    <div class="muted" style="font-size:11px;margin-bottom:6px">from: ${esc(r.name)} &middot; ${esc(r.src)} &middot; <span class="pin">${rnd(r.lat)}, ${rnd(r.lng)}</span></div>
+    <div id="kzmap_${r.i}" style="height:170px;border:1px solid var(--line);border-radius:8px;background:#eaeaed;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:12px">${mapAvailable()?'':'map needs internet — coordinates above are still used'}</div>
+  </div>`;
+  root.innerHTML=`<div class="backdrop"><div class="modal" style="max-width:720px"><div class="mh"><h3>New subs found in KMZ scan</h3>
+      <div class="muted" style="font-size:13px;margin-top:4px">${kmzRows.length} to review &middot; ${skipped} already in the library were skipped.
+      Each pin is the center of the KMZ site plan &mdash; rename before creating if needed.</div>
       ${errs.length?`<div class="muted" style="font-size:12px;margin-top:6px;color:var(--warn)">${errs.map(esc).join('<br>')}</div>`:''}</div>
-    <div class="mb"><div class="tablewrap" style="max-height:50vh"><table>
-      <thead><tr><th style="width:34px"></th><th>Subdivision</th><th style="width:90px">Status</th><th style="width:150px">Current</th><th style="width:150px">KMZ center</th></tr></thead>
-      <tbody id="kzBody">${kmzRows.map(rowHtml).join('')}</tbody></table></div></div>
-    <div class="mf"><button id="kzCancel">Cancel</button><button class="primary" id="kzApply">Apply checked</button></div>
+    <div class="mb" id="kzBody">${kmzRows.map(cardHtml).join('')}</div>
+    <div class="mf"><button id="kzCancel">Cancel</button><button class="primary" id="kzApply">Add checked to library</button></div>
   </div></div>`;
+  // mini maps (one small Leaflet per card, when online)
+  if(mapAvailable()){
+    for(const r of kmzRows){
+      const el=document.getElementById('kzmap_'+r.i); if(!el) continue;
+      el.textContent='';
+      try{
+        const mm=L.map(el,{zoomControl:false,attributionControl:false,dragging:true,scrollWheelZoom:false}).setView([r.lat,r.lng],14);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19}).addTo(mm);
+        L.marker([r.lat,r.lng]).addTo(mm);
+        setTimeout(()=>mm.invalidateSize(),60);
+      }catch(e){ el.textContent='map failed to load — coordinates above are still used'; }
+    }
+  }
   root.querySelector('#kzBody').addEventListener('change',e=>{
-    if(e.target.dataset.kzapply!=null){ const r=kmzRows[+e.target.dataset.kzapply]; if(r) r.apply=e.target.checked; }
-    if(e.target.dataset.kzname!=null){ const r=kmzRows[+e.target.dataset.kzname]; if(r) r.newName=e.target.value; }
+    if(e.target.dataset.kzapply!=null){ const r=kmzRows.find(x=>x.i===+e.target.dataset.kzapply); if(r) r.apply=e.target.checked; }
+    if(e.target.dataset.kzname!=null){ const r=kmzRows.find(x=>x.i===+e.target.dataset.kzname); if(r) r.newName=e.target.value; }
   });
   document.getElementById('kzCancel').onclick=()=>root.innerHTML='';
   document.getElementById('kzApply').onclick=()=>applyKmz();
 }
-function kmzSub(r){ return SUBS.find(s=>s.name===r.subName)||{lat:'',lng:''}; }
 function applyKmz(){
   let filled=0, added=0;
   for(const r of kmzRows){
@@ -965,15 +1311,15 @@ function applyKmz(){
     if(r.status==='new'){
       const nm=(r.newName||r.name||'').trim(); if(!nm) continue;
       const existing=SUBS.find(s=>norm(s.name)===norm(nm));
-      if(existing){ existing.lat=rnd(r.lat); existing.lng=rnd(r.lng); filled++; }
-      else { SUBS.push({name:nm, address:'(from KMZ)', lat:rnd(r.lat), lng:rnd(r.lng), aliases:[]}); added++; }
+      if(existing){ if(!subHasGeo(existing)){ existing.lat=rnd(r.lat); existing.lng=rnd(r.lng); filled++; } }
+      else { SUBS.push({name:nm, nickname:'', address:'(from KMZ)', lat:rnd(r.lat), lng:rnd(r.lng), aliases:[]}); added++; }
     } else {
       const sub=SUBS.find(s=>s.name===r.subName); if(!sub) continue;
       sub.lat=rnd(r.lat); sub.lng=rnd(r.lng); filled++;
     }
   }
   persistSubs(); document.getElementById('modalRoot').innerHTML=''; renderSubs();
-  showToast(`KMZ applied: ${added} added, ${filled} updated`);
+  showToast(`KMZ applied: ${added} added, ${filled} filled`);
 }
 
 /* ============================ HELPERS ============================ */
@@ -1061,14 +1407,47 @@ document.getElementById('kmzDir').onchange=e=>{
 };
 document.getElementById('exportSubs').onclick=()=>download('subdivisions.json',JSON.stringify(SUBS,null,2));
 document.getElementById('importSubsBtn').onclick=()=>document.getElementById('importSubs').click();
-document.getElementById('importSubs').onchange=e=>{ const f=e.target.files[0]; if(!f)return; const rd=new FileReader(); rd.onload=()=>{ try{const d=JSON.parse(rd.result); if(!Array.isArray(d))throw 0; SUBS=d.map(x=>({name:x.name||'',address:x.address||'',lat:x.lat,lng:x.lng,aliases:x.aliases||[]})); persistSubs(); renderSubs(); showToast('Imported '+SUBS.length+' subdivisions'); }catch(err){ showToast('Invalid JSON'); } }; rd.readAsText(f); e.target.value=''; };
+document.getElementById('importSubs').onchange=e=>{ const f=e.target.files[0]; if(!f)return; const rd=new FileReader(); rd.onload=()=>{ try{const d=JSON.parse(rd.result); if(!Array.isArray(d))throw 0; SUBS=d.map(x=>({name:x.name||'',nickname:x.nickname||'',address:x.address||'',lat:x.lat==null?null:x.lat,lng:x.lng==null?null:x.lng,aliases:x.aliases||[]})); persistSubs(); renderSubs(); showToast('Imported '+SUBS.length+' subdivisions'); }catch(err){ showToast('Invalid JSON'); } }; rd.readAsText(f); e.target.value=''; };
 document.getElementById('resetSubs').onclick=()=>{ if(confirm('Reset the subdivision library to the original seed? Your changes will be lost.')){ SUBS=JSON.parse(JSON.stringify(SUBS_SEED)); persistSubs(); renderSubs(); showToast('Reset'); } };
-document.getElementById('subBody').addEventListener('click',e=>{
+document.getElementById('subsMapBtn').onclick=()=>toggleSubsMap();
+const subsListEl=document.getElementById('subsList');
+subsListEl.addEventListener('change',e=>{
   const t=e.target;
-  if(t.dataset.editsub!=null) return editSubModal(+t.dataset.editsub);
-  if(t.dataset.delsub!=null){ const i=+t.dataset.delsub; if(confirm('Delete "'+SUBS[i].name+'"?')){ SUBS.splice(i,1); persistSubs(); renderSubs(); } return; }
-  if(t.dataset.delalias!=null){ const i=+t.dataset.delalias, ai=+t.dataset.ai; SUBS[i].aliases.splice(ai,1); persistSubs(); renderSubs(); return; }
-  if(t.dataset.addalias!=null){ const i=+t.dataset.addalias; const a=prompt('New alias (the ERP spelling) for "'+SUBS[i].name+'":'); if(a&&a.trim()){ (SUBS[i].aliases=SUBS[i].aliases||[]).push(a.trim()); persistSubs(); renderSubs(); } return; }
+  if(t.dataset.f==null||t.dataset.i==null) return;
+  const s=SUBS[+t.dataset.i]; if(!s) return;
+  const v=t.value.trim();
+  if(t.dataset.f==='name'){
+    if(!v){ t.value=s.name; return; }
+    if(norm(v)!==norm(s.name) && SUBS.some(x=>x!==s&&norm(x.name)===norm(v))){ showToast('That name already exists'); t.value=s.name; return; }
+    s.name=v;
+  } else s[t.dataset.f]=v;
+  persistSubs(); renderSubs();
+});
+subsListEl.addEventListener('click',e=>{
+  const t=e.target.closest('[data-geo],[data-adel],[data-aadd],[data-map],[data-del]');
+  if(!t) return;
+  if(t.dataset.geo!=null) return openGeoEditor(+t.dataset.geo);
+  if(t.dataset.map!=null) return focusSubOnMap(+t.dataset.map);
+  if(t.dataset.del!=null){ const i=+t.dataset.del; if(confirm('Delete "'+SUBS[i].name+'"?')){ SUBS.splice(i,1); persistSubs(); renderSubs(); } return; }
+  if(t.dataset.adel!=null){ const i=+t.dataset.adel, ai=+t.dataset.ai; SUBS[i].aliases.splice(ai,1); persistSubs(); renderSubs(); return; }
+  if(t.dataset.aadd!=null){
+    const i=+t.dataset.aadd;
+    const input=document.createElement('input');
+    input.type='text'; input.className='alias-input'; input.placeholder='new alias…';
+    t.replaceWith(input); input.focus();
+    let committed=false; // Enter triggers blur too — commit exactly once
+    const commit=()=>{
+      if(committed) return; committed=true;
+      const val=input.value.trim();
+      if(val){ const s=SUBS[i];
+        if(s){ if(!Array.isArray(s.aliases)) s.aliases=[];
+          if(!s.aliases.some(a=>norm(a)===norm(val))){ s.aliases.push(val); persistSubs(); } } }
+      renderSubs();
+    };
+    input.addEventListener('keydown',ev=>{ if(ev.key==='Enter'){ ev.preventDefault(); commit(); } else if(ev.key==='Escape'){ committed=true; renderSubs(); } });
+    input.addEventListener('blur',commit);
+    return;
+  }
 });
 
 // crews
