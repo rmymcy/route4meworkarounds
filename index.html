@@ -256,6 +256,7 @@
         <button class="small" id="kmzBtn">Update from KMZ&hellip;</button>
         <input type="file" id="kmzFile" accept=".kmz,.kml" multiple class="hide">
         <button class="small" id="kmzDirBtn">Scan folder&hellip;</button>
+        <button class="small hide" id="kmzRescanBtn" title="re-scan the same folder as last time (uses the cache, so it's fast)">Rescan last</button>
         <input type="file" id="kmzDir" webkitdirectory directory multiple class="hide">
         <button class="small" id="exportSubs">Export JSON</button>
         <button class="small" id="importSubsBtn">Import JSON</button>
@@ -1228,48 +1229,107 @@ function matchSubForKmz(name, idx){
 }
 function stripPhase(n){ return String(n||'').replace(/\s+(phase|ph|sht|sheet|unit|pod|parcel|section|sec)\s*\d.*$/i,'').trim()||String(n||''); }
 function rnd(v){ return Math.round(Number(v)*1e6)/1e6; }
-/* Modern folder scan (Chrome/Edge): we crawl the tree ourselves with live
-   progress and only ever open .kmz/.kml. No upfront enumeration by the browser,
-   so huge network shares show feedback within seconds instead of hanging. */
-async function scanFolderModern(){
-  let dirHandle;
-  try{ dirHandle=await window.showDirectoryPicker({mode:'read'}); }
-  catch(e){
-    if(e && (e.name==='AbortError'||e.name==='NotAllowedError')){ setKmzStatus('Folder selection cancelled.'); return; }
-    setKmzStatus('Could not open the folder picker ('+esc(e.message||e.name)+') — falling back to the classic picker.');
-    document.getElementById('kmzDir').click(); return;
+/* ---- remember the last scanned folder handle (IndexedDB) for one-click rescan ---- */
+function idbOpen(){ return new Promise((res,rej)=>{ const r=indexedDB.open('r4m_tool',1);
+  r.onupgradeneeded=()=>r.result.createObjectStore('kv'); r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error); }); }
+async function idbSet(key,val){ try{ const db=await idbOpen(); await new Promise((res,rej)=>{ const tx=db.transaction('kv','readwrite');
+  tx.objectStore('kv').put(val,key); tx.oncomplete=res; tx.onerror=()=>rej(tx.error); }); db.close(); }catch(e){} }
+async function idbGet(key){ try{ const db=await idbOpen(); const v=await new Promise((res,rej)=>{ const tx=db.transaction('kv','readonly');
+  const rq=tx.objectStore('kv').get(key); rq.onsuccess=()=>res(rq.result); rq.onerror=()=>rej(rq.error); }); db.close(); return v; }catch(e){ return null; } }
+
+/* ---- per-file parse cache: skip re-reading KMZs that haven't changed ---- */
+const K_KMZCACHE='r4m_kmzcache_v1';
+let KMZCACHE=load(K_KMZCACHE,{});
+function persistKmzCache(){ try{ const n=Object.keys(KMZCACHE).length; if(n>20000) KMZCACHE={}; save(K_KMZCACHE,KMZCACHE); }catch(e){} }
+
+/* Modern folder scan (Chrome/Edge): we crawl the tree ourselves — in parallel —
+   with live progress, and only ever open .kmz/.kml. */
+async function scanFolderModern(dirHandle){
+  if(!dirHandle){
+    try{ dirHandle=await window.showDirectoryPicker({mode:'read'}); }
+    catch(e){
+      if(e && (e.name==='AbortError'||e.name==='NotAllowedError')){ setKmzStatus('Folder selection cancelled.'); return; }
+      setKmzStatus('Could not open the folder picker ('+esc(e.message||e.name)+') — falling back to the classic picker.');
+      document.getElementById('kmzDir').click(); return;
+    }
+    idbSet('lastDir',dirHandle).then(()=>document.getElementById('kmzRescanBtn').classList.remove('hide'));
   }
-  const files=[]; let dirs=0, seen=0, lastPaint=0, denied=0;
-  setKmzStatus('Starting crawl&hellip;');
-  async function walk(dh){
-    dirs++;
-    let it;
-    try{ it=dh.values(); }catch(e){ denied++; return; }
+  const items=[]; let dirs=0, seen=0, denied=0, lastPaint=0;
+  const queue=[{dh:dirHandle,path:dirHandle.name||''}];
+  let active=0;
+  const paint=()=>{ const now=Date.now(); if(now-lastPaint>150){ lastPaint=now;
+    setKmzStatus(`Crawling (parallel)&hellip; <b>${dirs}</b> folder(s) · <b>${seen}</b> item(s) · <b>${items.length}</b> KMZ/KML found${denied?` · <span style="color:var(--warn)">${denied} denied</span>`:''}`); } };
+  async function worker(){
     while(true){
-      let entry;
-      try{ const r=await it.next(); if(r.done) break; entry=r.value; }
-      catch(e){ denied++; break; }
-      seen++;
-      const now=Date.now();
-      if(now-lastPaint>150){
-        lastPaint=now;
-        setKmzStatus(`Crawling&hellip; <b>${dirs}</b> folder(s), <b>${seen}</b> item(s) seen · <b>${files.length}</b> KMZ/KML found so far`);
-        await new Promise(r=>setTimeout(r,0));
-      }
-      if(entry.kind==='directory'){ await walk(entry); }
-      else if(/\.(kmz|kml)$/i.test(entry.name)){
-        try{ files.push(await entry.getFile()); }catch(e){ denied++; }
-      }
+      const job=queue.pop();
+      if(!job){ if(active===0) return; await new Promise(r=>setTimeout(r,12)); continue; }
+      active++;
+      try{
+        dirs++;
+        let it; try{ it=job.dh.values(); }catch(e){ denied++; active--; continue; }
+        while(true){
+          let r; try{ r=await it.next(); }catch(e){ denied++; break; }
+          if(r.done) break;
+          const entry=r.value; seen++; paint();
+          const p=job.path+'/'+entry.name;
+          if(entry.kind==='directory') queue.push({dh:entry,path:p});
+          else if(/\.(kmz|kml)$/i.test(entry.name)) items.push({name:entry.name, path:p, getFile:()=>entry.getFile()});
+        }
+      } finally{ active--; }
     }
   }
-  await walk(dirHandle);
+  setKmzStatus('Starting crawl&hellip;');
+  await Promise.all(Array.from({length:12},worker));
   const deniedNote=denied?` · <span style="color:var(--warn)">${denied} unreadable/denied</span>`:'';
-  if(!files.length){
+  if(!items.length){
     setKmzStatus(`<b>Scan finished:</b> crawled ${dirs} folder(s), ${seen} item(s) &mdash; <b>no .kmz / .kml found</b>${deniedNote}. Check the folder level you picked.`);
     return;
   }
-  setKmzStatus(`Crawl done: ${dirs} folder(s), ${seen} item(s)${deniedNote}. Reading ${files.length} KMZ/KML&hellip;`);
-  await processKmzFiles(files);
+  setKmzStatus(`Crawl done: ${dirs} folder(s), ${seen} item(s)${deniedNote}. Reading ${items.length} KMZ/KML&hellip;`);
+  await processKmzItems(items);
+}
+
+/* Ranged KMZ read: a KMZ is a ZIP with the index at the END. Read the tail to
+   find doc.kml's exact byte span and read only that — a few KB instead of the
+   whole multi-MB site-plan image. Falls back to a full read on anything odd. */
+async function readKmlFromKmzRanged(file){
+  const size=file.size;
+  if(size<=131072) return readKmlFromKmz(await file.arrayBuffer()); // small file: one read is fine
+  try{
+    const tailLen=Math.min(size,66000);
+    const tailStart=size-tailLen;
+    const tail=new Uint8Array(await file.slice(tailStart).arrayBuffer());
+    const dv=new DataView(tail.buffer);
+    let eocd=-1;
+    for(let i=tail.length-22;i>=0;i--){ if(dv.getUint32(i,true)===0x06054b50){ eocd=i; break; } }
+    if(eocd<0) throw 0;
+    const cdCount=dv.getUint16(eocd+10,true), cdSize=dv.getUint32(eocd+12,true), cdOff=dv.getUint32(eocd+16,true);
+    if(cdOff===0xFFFFFFFF) throw 0; // zip64 -> full read
+    let cd;
+    if(cdOff>=tailStart) cd=tail.subarray(cdOff-tailStart, cdOff-tailStart+cdSize);
+    else cd=new Uint8Array(await file.slice(cdOff, cdOff+cdSize).arrayBuffer());
+    const cdv=new DataView(cd.buffer,cd.byteOffset,cd.byteLength);
+    let p=0,kml=null;
+    for(let n=0;n<cdCount;n++){
+      if(cdv.getUint32(p,true)!==0x02014b50) break;
+      const method=cdv.getUint16(p+10,true), compSize=cdv.getUint32(p+20,true);
+      const nameLen=cdv.getUint16(p+28,true), extraLen=cdv.getUint16(p+30,true), commentLen=cdv.getUint16(p+32,true);
+      const localOff=cdv.getUint32(p+42,true);
+      const name=new TextDecoder().decode(cd.subarray(p+46,p+46+nameLen));
+      if(name.toLowerCase().endsWith('.kml') && (!kml||name.toLowerCase()==='doc.kml')) kml={method,compSize,localOff};
+      p+=46+nameLen+extraLen+commentLen;
+    }
+    if(!kml||kml.compSize===0xFFFFFFFF) throw 0;
+    const lh=new Uint8Array(await file.slice(kml.localOff, kml.localOff+30).arrayBuffer());
+    const ldv=new DataView(lh.buffer);
+    if(ldv.getUint32(0,true)!==0x04034b50) throw 0;
+    const dataStart=kml.localOff+30+ldv.getUint16(26,true)+ldv.getUint16(28,true);
+    const comp=new Uint8Array(await file.slice(dataStart, dataStart+kml.compSize).arrayBuffer());
+    const raw=kml.method===0?comp:await inflateRaw(comp);
+    return new TextDecoder('utf-8').decode(raw);
+  }catch(e){
+    return readKmlFromKmz(await file.arrayBuffer());
+  }
 }
 function setKmzStatus(html){
   const el=document.getElementById('kmzStatus'); if(!el) return;
@@ -1277,25 +1337,49 @@ function setKmzStatus(html){
   el.classList.remove('hide');
   el.innerHTML=`<span style="float:right;cursor:pointer;color:var(--muted);font-weight:700;margin-left:10px" onclick="setKmzStatus('')" title="dismiss">&times;</span>${html}`;
 }
-async function processKmzFiles(files){
+function processKmzFiles(files){ // classic-picker path: wrap plain Files as items
+  return processKmzItems([...files].map(f=>({name:f.name, path:f.webkitRelativePath||f.name, getFile:async()=>f})));
+}
+async function processKmzItems(items){
   const locs=[], errs=[];
-  let done=0;
-  for(const f of files){
-    done++;
-    setKmzStatus(`Scanning KMZ/KML&hellip; <b>${done} / ${files.length}</b> &mdash; ${esc(f.name)}`);
-    await new Promise(r=>setTimeout(r,0)); // let the progress line paint
-    try{
-      const kml = /\.kml$/i.test(f.name) ? await f.text() : await readKmlFromKmz(await f.arrayBuffer());
-      const found=extractLocationsFromKml(kml);
-      if(!found.length) errs.push(`${f.name}: no location found`);
-      found.forEach(x=>{ if(x.name) locs.push({...x,src:f.name}); });
-    }catch(e){ errs.push(`${f.name}: ${e.message}`); }
+  let done=0, cachedHits=0, lastPaint=0;
+  const paint=()=>{ const now=Date.now(); if(now-lastPaint>150){ lastPaint=now;
+    setKmzStatus(`Reading KMZ/KML&hellip; <b>${done} / ${items.length}</b>${cachedHits?` · <b>${cachedHits}</b> from cache (unchanged)`:''}`); } };
+  const queue=items.slice();
+  async function worker(){
+    while(queue.length){
+      const item=queue.pop(); if(!item) continue;
+      try{
+        const f=await item.getFile();
+        const key=item.path||item.name;
+        const c=KMZCACHE[key];
+        if(c && c.s===f.size && c.m===f.lastModified){        // unchanged since last scan
+          cachedHits++;
+          if(c.err) errs.push(`${item.name}: ${c.err}`);
+          else (c.locs||[]).forEach(x=>{ if(x.name) locs.push({...x,src:item.name}); });
+        } else {
+          try{
+            const kml = /\.kml$/i.test(f.name) ? await f.text() : await readKmlFromKmzRanged(f);
+            const found=extractLocationsFromKml(kml).filter(x=>x.name);
+            KMZCACHE[key]={s:f.size,m:f.lastModified,locs:found};
+            if(!found.length){ KMZCACHE[key].err='no location found'; errs.push(`${item.name}: no location found`); }
+            found.forEach(x=>locs.push({...x,src:item.name}));
+          }catch(e){
+            KMZCACHE[key]={s:f.size,m:f.lastModified,err:e.message||'unreadable'};
+            errs.push(`${item.name}: ${e.message}`);
+          }
+        }
+      }catch(e){ errs.push(`${item.name}: ${e.message||'could not open'}`); }
+      done++; paint();
+    }
   }
+  await Promise.all(Array.from({length:8},worker));
+  persistKmzCache();
   if(!locs.length){
-    setKmzStatus(`<b>Scan finished:</b> ${files.length} KMZ/KML file(s) read, but no usable locations found.${errs.length?` Problems: ${esc(errs.slice(0,3).join(' · '))}${errs.length>3?` (+${errs.length-3} more)`:''}`:''}`);
+    setKmzStatus(`<b>Scan finished:</b> ${items.length} KMZ/KML file(s) checked${cachedHits?` (${cachedHits} from cache)`:''}, but no usable locations found.${errs.length?` Problems: ${esc(errs.slice(0,3).join(' · '))}${errs.length>3?` (+${errs.length-3} more)`:''}`:''}`);
     return;
   }
-  openKmzReview(locs, errs, files.length);
+  openKmzReview(locs, errs, items.length);
 }
 let kmzRows=[];
 function openKmzReview(locs, errs, fileCount){
@@ -1348,7 +1432,7 @@ function openKmzReview(locs, errs, fileCount){
       const el=document.getElementById('kzmap_'+r.i); if(!el) continue;
       el.textContent='';
       try{
-        const mm=L.map(el,{zoomControl:false,attributionControl:false,dragging:true,scrollWheelZoom:false}).setView([r.lat,r.lng],14);
+        const mm=L.map(el,{zoomControl:true,attributionControl:false,dragging:true,scrollWheelZoom:true,zoomDelta:0.5,zoomSnap:0.5}).setView([r.lat,r.lng],14);
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19}).addTo(mm);
         L.marker([r.lat,r.lng]).addTo(mm);
         setTimeout(()=>mm.invalidateSize(),60);
@@ -1470,6 +1554,19 @@ document.getElementById('kmzDir').onchange=e=>{
   e.target.value='';
   if(!kmz.length){ setKmzStatus(`<b>Scan finished:</b> the folder handed over ${all.length} file(s), but <b>none were .kmz / .kml</b>. Check you picked the right folder level.`); return; }
   processKmzFiles(kmz);
+};
+// one-click rescan of the last-picked folder (modern picker only)
+if(window.showDirectoryPicker) idbGet('lastDir').then(h=>{ if(h) document.getElementById('kmzRescanBtn').classList.remove('hide'); });
+document.getElementById('kmzRescanBtn').onclick=async()=>{
+  const h=await idbGet('lastDir');
+  if(!h){ setKmzStatus('No remembered folder yet — use Scan folder first.'); return; }
+  try{
+    let perm=await h.queryPermission({mode:'read'});
+    if(perm!=='granted') perm=await h.requestPermission({mode:'read'});
+    if(perm!=='granted'){ setKmzStatus('Chrome denied access to the remembered folder — use Scan folder to pick it again.'); return; }
+  }catch(e){ setKmzStatus('Could not reopen the remembered folder — use Scan folder to pick it again.'); return; }
+  setKmzStatus(`Rescanning <b>${esc(h.name||'last folder')}</b>&hellip; unchanged KMZs come from cache, so this should be quick.`);
+  scanFolderModern(h);
 };
 document.getElementById('exportSubs').onclick=()=>download('subdivisions.json',JSON.stringify(SUBS,null,2));
 document.getElementById('importSubsBtn').onclick=()=>document.getElementById('importSubs').click();
