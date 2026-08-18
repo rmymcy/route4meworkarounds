@@ -262,6 +262,7 @@
         <input type="file" id="importSubs" accept=".json" class="hide">
         <button class="small danger" id="resetSubs">Reset to seed</button>
       </div>
+      <div id="kmzStatus" class="note hide" style="margin-bottom:12px"></div>
       <div id="subsListWrap">
         <div class="subs-grid-head"><div></div><div>Name</div><div>Nickname</div><div>Address</div><div>Lat / Long</div><div>Aliases</div><div style="text-align:right">Actions</div></div>
         <div id="subsList" style="max-height:56vh;overflow-y:auto"></div>
@@ -1227,9 +1228,19 @@ function matchSubForKmz(name, idx){
 }
 function stripPhase(n){ return String(n||'').replace(/\s+(phase|ph|sht|sheet|unit|pod|parcel|section|sec)\s*\d.*$/i,'').trim()||String(n||''); }
 function rnd(v){ return Math.round(Number(v)*1e6)/1e6; }
+function setKmzStatus(html){
+  const el=document.getElementById('kmzStatus'); if(!el) return;
+  if(!html){ el.classList.add('hide'); el.innerHTML=''; return; }
+  el.classList.remove('hide');
+  el.innerHTML=`<span style="float:right;cursor:pointer;color:var(--muted);font-weight:700;margin-left:10px" onclick="setKmzStatus('')" title="dismiss">&times;</span>${html}`;
+}
 async function processKmzFiles(files){
   const locs=[], errs=[];
+  let done=0;
   for(const f of files){
+    done++;
+    setKmzStatus(`Scanning KMZ/KML&hellip; <b>${done} / ${files.length}</b> &mdash; ${esc(f.name)}`);
+    await new Promise(r=>setTimeout(r,0)); // let the progress line paint
     try{
       const kml = /\.kml$/i.test(f.name) ? await f.text() : await readKmlFromKmz(await f.arrayBuffer());
       const found=extractLocationsFromKml(kml);
@@ -1237,11 +1248,14 @@ async function processKmzFiles(files){
       found.forEach(x=>{ if(x.name) locs.push({...x,src:f.name}); });
     }catch(e){ errs.push(`${f.name}: ${e.message}`); }
   }
-  if(!locs.length){ showToast(errs[0]||'No locations found'); return; }
-  openKmzReview(locs, errs);
+  if(!locs.length){
+    setKmzStatus(`<b>Scan finished:</b> ${files.length} KMZ/KML file(s) read, but no usable locations found.${errs.length?` Problems: ${esc(errs.slice(0,3).join(' · '))}${errs.length>3?` (+${errs.length-3} more)`:''}`:''}`);
+    return;
+  }
+  openKmzReview(locs, errs, files.length);
 }
 let kmzRows=[];
-function openKmzReview(locs, errs){
+function openKmzReview(locs, errs, fileCount){
   const idx=buildIndex();
   const all=locs.map((L,i)=>{
     const m=matchSubForKmz(L.name, idx), sub=m.sub;
@@ -1263,9 +1277,10 @@ function openKmzReview(locs, errs){
   const root=document.getElementById('modalRoot');
   if(!kmzRows.length){
     root.innerHTML='';
-    showToast(`Scan done — ${skipped} sub${skipped===1?'':'s'} already in the library, nothing new to add${errs.length?` (${errs.length} file(s) unreadable)`:''}`);
+    setKmzStatus(`<b>Scan finished:</b> ${fileCount!=null?fileCount+' file(s) read · ':''}<b>${skipped}</b> sub${skipped===1?'':'s'} matched the library and were skipped &mdash; <b>nothing new to add</b>. Your library already covers this folder.${errs.length?` <span style="color:var(--warn)">(${errs.length} file(s) unreadable)</span>`:''}`);
     return;
   }
+  setKmzStatus(`<b>Scan finished:</b> ${fileCount!=null?fileCount+' file(s) read · ':''}<b>${kmzRows.length}</b> to review · <b>${skipped}</b> already in the library (skipped)${errs.length?` · <span style="color:var(--warn)">${errs.length} unreadable</span>`:''}`);
   const cardHtml=(r,k)=>`<div class="review-card" data-kz="${r.i}">
     <div class="review-head">
       ${r.status==='new'
@@ -1319,6 +1334,7 @@ function applyKmz(){
     }
   }
   persistSubs(); document.getElementById('modalRoot').innerHTML=''; renderSubs();
+  setKmzStatus(`<b>KMZ applied:</b> ${added} new sub${added===1?'':'s'} added · ${filled} blank coordinate${filled===1?'':'s'} filled.`);
   showToast(`KMZ applied: ${added} added, ${filled} filled`);
 }
 
@@ -1397,12 +1413,14 @@ document.getElementById('subSearch').oninput=renderSubs;
 document.getElementById('addSubBtn').onclick=()=>editSubModal(-1);
 document.getElementById('kmzBtn').onclick=()=>document.getElementById('kmzFile').click();
 document.getElementById('kmzFile').onchange=e=>{ const fs=[...e.target.files]; if(fs.length) processKmzFiles(fs); e.target.value=''; };
-document.getElementById('kmzDirBtn').onclick=()=>document.getElementById('kmzDir').click();
+document.getElementById('kmzDirBtn').onclick=()=>{
+  setKmzStatus(`Waiting for folder selection&hellip; Large network folders can take a minute to list. If Chrome asks to <b>&ldquo;Upload N files&rdquo;</b>, click Upload &mdash; nothing leaves this computer; that&rsquo;s just how the browser hands a local page the file list. (If you cancelled the picker, click Scan folder again.)`);
+  document.getElementById('kmzDir').click();
+};
 document.getElementById('kmzDir').onchange=e=>{
   const all=[...e.target.files]; const kmz=all.filter(f=>/\.(kmz|kml)$/i.test(f.name));
   e.target.value='';
-  if(!kmz.length){ showToast(`No KMZ/KML files found in that folder (${all.length} files scanned)`); return; }
-  showToast(`Scanning ${kmz.length} KMZ/KML file(s)…`);
+  if(!kmz.length){ setKmzStatus(`<b>Scan finished:</b> the folder handed over ${all.length} file(s), but <b>none were .kmz / .kml</b>. Check you picked the right folder level.`); return; }
   processKmzFiles(kmz);
 };
 document.getElementById('exportSubs').onclick=()=>download('subdivisions.json',JSON.stringify(SUBS,null,2));
