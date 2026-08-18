@@ -195,6 +195,8 @@
         <button class="primary small" id="addSubBtn">+ Add subdivision</button>
         <button class="small" id="kmzBtn">Update from KMZ&hellip;</button>
         <input type="file" id="kmzFile" accept=".kmz,.kml" multiple class="hide">
+        <button class="small" id="kmzDirBtn">Scan folder&hellip;</button>
+        <input type="file" id="kmzDir" webkitdirectory directory multiple class="hide">
         <button class="small" id="exportSubs">Export JSON</button>
         <button class="small" id="importSubsBtn">Import JSON</button>
         <input type="file" id="importSubs" accept=".json" class="hide">
@@ -1049,6 +1051,14 @@ document.getElementById('subSearch').oninput=renderSubs;
 document.getElementById('addSubBtn').onclick=()=>editSubModal(-1);
 document.getElementById('kmzBtn').onclick=()=>document.getElementById('kmzFile').click();
 document.getElementById('kmzFile').onchange=e=>{ const fs=[...e.target.files]; if(fs.length) processKmzFiles(fs); e.target.value=''; };
+document.getElementById('kmzDirBtn').onclick=()=>document.getElementById('kmzDir').click();
+document.getElementById('kmzDir').onchange=e=>{
+  const all=[...e.target.files]; const kmz=all.filter(f=>/\.(kmz|kml)$/i.test(f.name));
+  e.target.value='';
+  if(!kmz.length){ showToast(`No KMZ/KML files found in that folder (${all.length} files scanned)`); return; }
+  showToast(`Scanning ${kmz.length} KMZ/KML file(s)…`);
+  processKmzFiles(kmz);
+};
 document.getElementById('exportSubs').onclick=()=>download('subdivisions.json',JSON.stringify(SUBS,null,2));
 document.getElementById('importSubsBtn').onclick=()=>document.getElementById('importSubs').click();
 document.getElementById('importSubs').onchange=e=>{ const f=e.target.files[0]; if(!f)return; const rd=new FileReader(); rd.onload=()=>{ try{const d=JSON.parse(rd.result); if(!Array.isArray(d))throw 0; SUBS=d.map(x=>({name:x.name||'',address:x.address||'',lat:x.lat,lng:x.lng,aliases:x.aliases||[]})); persistSubs(); renderSubs(); showToast('Imported '+SUBS.length+' subdivisions'); }catch(err){ showToast('Invalid JSON'); } }; rd.readAsText(f); e.target.value=''; };
