@@ -5,7 +5,15 @@ Route4Me-ready upload — and (coming next) converts Route4Me's export back into
 the ERP's expected format.
 
 ## Use it
-Open `index.html` in any browser. Nothing is uploaded; all processing happens
+Two independent pages (they never share data, even side by side):
+
+- **`index.html`** — the Florida model (blue). Curated library, production use.
+- **`company.html`** — the company-wide model (orange, titled "Company").
+  Its library is pre-seeded with the curated FL subs **plus every deduplicated
+  Customer Zone from the Geotab zones export** (~8,150 entries, FL + TX).
+  Regenerate it after changing `index.html` with `python3 build_company.py`.
+
+Open either in any browser. Nothing is uploaded; all processing happens
 locally and the libraries are saved in your browser.
 
 ### Convert (ERP → Route4Me)

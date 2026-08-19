@@ -960,10 +960,13 @@ function subsFilterList(){
     .sort((a,b)=>a.s.name.localeCompare(b.s.name));
   return {list, filtered:!!q};
 }
+const SUBS_RENDER_CAP=400; // huge libraries: render the first N, filter to narrow
 function renderSubs(){
   const body=document.getElementById('subsList');
   const {list}=subsFilterList();
-  body.innerHTML=list.map(({s,i})=>{
+  const capped=list.length>SUBS_RENDER_CAP;
+  const shown=capped?list.slice(0,SUBS_RENDER_CAP):list;
+  body.innerHTML=shown.map(({s,i})=>{
     const geo=subHasGeo(s);
     return `<div class="sub-card2" data-i="${i}">
       <div style="display:flex;justify-content:center"><span class="dot ${geo?'dot-green':'dot-amber'}" title="${geo?'has coordinates':'no coordinates yet'}"></span></div>
@@ -983,7 +986,7 @@ function renderSubs(){
       </div>
     </div>`;}).join('') || `<div class="muted" style="text-align:center;padding:36px">${SUBS.length?'no subs match the filter':'no subs yet — add one or import'}</div>`;
   const withGeo=SUBS.filter(subHasGeo).length;
-  document.getElementById('subCount').textContent=`${SUBS.length} subdivisions · ${withGeo} with coordinates${SUBS.length-withGeo?` · ${SUBS.length-withGeo} without`:''}`;
+  document.getElementById('subCount').textContent=`${SUBS.length} subdivisions · ${withGeo} with coordinates${SUBS.length-withGeo?` · ${SUBS.length-withGeo} without`:''}${capped?` · showing first ${SUBS_RENDER_CAP} of ${list.length} — filter to narrow`:''}`;
   renderSubsMap(false); // keep map in step when it's open
 }
 
@@ -1031,7 +1034,7 @@ function renderSubsMap(fit){
   const wrap=document.getElementById('subsMapWrap');
   if(!wrap||wrap.classList.contains('hide')||!mapAvailable()) return;
   if(!subsMapInstance){
-    subsMapInstance=L.map('subsMapWrap',{zoomControl:true,zoomDelta:0.5,zoomSnap:0.5}).setView([28.5,-81.4],8);
+    subsMapInstance=L.map('subsMapWrap',{zoomControl:true,zoomDelta:0.5,zoomSnap:0.5,preferCanvas:true}).setView([28.5,-81.4],8);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'© OpenStreetMap',maxZoom:19}).addTo(subsMapInstance);
     subsMapLayer=L.layerGroup().addTo(subsMapInstance);
     const info=L.control({position:'topright'});
@@ -2040,7 +2043,7 @@ document.getElementById('crewBody').addEventListener('click',e=>{
 });
 
 // init
-const APP_VERSION='v30 · 2026-08-19';
+const APP_VERSION='v31 · 2026-08-19';
 document.getElementById('appVer').textContent=APP_VERSION;
 renderSubs(); renderCrews();
 </script>
