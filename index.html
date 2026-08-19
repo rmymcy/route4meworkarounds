@@ -291,6 +291,8 @@
       <div class="toolbar">
         <input type="search" class="grow" id="crewSearch" placeholder="Filter&hellip;">
         <button class="primary small" id="addCrewBtn">+ Add</button>
+        <button class="small" id="crewsXlsBtn" title="import the Crew Setup Template filled out by a manager">Crews (Excel)&hellip;</button>
+        <input type="file" id="crewsXlsFile" accept=".xlsx,.csv" class="hide">
         <div class="menu-wrap">
           <button class="small" id="crewsMenuBtn" title="more">&#8943;</button>
           <div class="menu" id="crewsMenu">
@@ -1093,7 +1095,7 @@ function renderCrews(){
     return `
     <tr style="${on?'':'opacity:.5'}">
       <td><label class="switch"><input type="checkbox" data-togglecrew="${i}" ${on?'checked':''}><span class="track"></span></label></td>
-      <td><b>${esc(c.name)} ${esc(c.last||'')}</b> ${on?'<span class="badge ok">Working</span>':'<span class="badge warn">Day off</span>'}</td>
+      <td><b>${esc(c.name)} ${esc(c.last||'')}</b> ${on?'<span class="badge ok">Working</span>':'<span class="badge warn">Day off</span>'}${c.email?`<div class="muted" style="font-size:11px">${esc(c.email)}</div>`:''}</td>
       <td>${c.code?`<span class="chip" style="background:#eef6ff;color:#2563eb;font-weight:700">${esc(c.code)}</span>`:'<span class="badge err">no code</span>'}</td>
       <td class="muted">${esc(c.name)} Home</td>
       <td class="pin">${fmtCoord(c.lat)}, ${fmtCoord(c.lng)}</td>
@@ -1151,8 +1153,11 @@ function editCrewModal(i){
         <div><label class="fld">Last name</label><input type="text" id="c_last" value="${esc(c.last||'')}" placeholder="Cope">
           <div class="muted" style="font-size:11px;margin-top:4px">Must match the Route4Me driver name</div></div>
       </div>
-      <div style="margin-bottom:12px"><label class="fld">Servicer Id / crew code</label><input type="text" id="c_code" value="${esc(c.code||'')}" placeholder="F85">
-        <div class="muted" style="font-size:11px;margin-top:4px">Written into the Servicer Id column on the way back to the ERP</div></div>
+      <div class="split" style="margin-bottom:12px">
+        <div><label class="fld">Servicer Id / crew code</label><input type="text" id="c_code" value="${esc(c.code||'')}" placeholder="F85">
+          <div class="muted" style="font-size:11px;margin-top:4px">Written into Servicer Id on the way back to Sage</div></div>
+        <div><label class="fld">Work email (optional)</label><input type="text" id="c_email" value="${esc(c.email||'')}" placeholder="name@company.com"></div>
+      </div>
       <div class="split">
         <div><label class="fld">Latitude</label><input type="number" step="any" id="c_lat" value="${c.lat}"></div>
         <div><label class="fld">Longitude</label><input type="number" step="any" id="c_lng" value="${c.lng}"></div>
@@ -1169,6 +1174,7 @@ function editCrewModal(i){
     if(!name){ showToast('Crew name required'); return; }
     if(lat===''||lng===''||!isFinite(+lat)||!isFinite(+lng)){ showToast('Valid lat & long required'); return; }
     const rec={name,last:document.getElementById('c_last').value.trim(),code:document.getElementById('c_code').value.trim(),
+      email:document.getElementById('c_email').value.trim(),
       lat:+lat,lng:+lng,active:isNew?true:isActive(CREWS[i])};
     if(isNew) CREWS.push(rec); else CREWS[i]=rec;
     persistCrews(); root.innerHTML=''; renderCrews(); showToast('Saved');
@@ -1318,6 +1324,55 @@ async function processZonesFile(f){
 }
 const ZONES_NEAR_MI=75;
 let ZONES_FAR_PENDING=[];
+
+/* ---- Crew Setup Template import (managers fill the xlsx, dispatch imports it) ---- */
+async function processCrewsFile(f){
+  try{
+    const grid=/\.csv$/i.test(f.name) ? parseCSV(await f.text()) : await parseXlsxGrid(await f.arrayBuffer());
+    let hr=-1, iFirst=-1, iLast=-1, iMail=-1, iCode=-1, iLat=-1, iLng=-1;
+    for(let r=0;r<Math.min(12,grid.length);r++){
+      const cells=(grid[r]||[]).map(c=>norm(c));
+      const fi=cells.findIndex(c=>/first/.test(c));
+      const la=cells.findIndex(c=>/lat/.test(c));
+      const lo=cells.findIndex(c=>/(lon|lng)/.test(c));
+      if(fi>=0 && la>=0 && lo>=0 && la!==lo){
+        hr=r; iFirst=fi; iLat=la; iLng=lo;
+        iLast=cells.findIndex(c=>/last/.test(c));
+        iMail=cells.findIndex(c=>/mail/.test(c));
+        iCode=cells.findIndex(c=>/servicer|f##|code/.test(c));
+        break;
+      }
+    }
+    if(hr<0) throw new Error('Not the crew template — need First Name + Home Latitude/Longitude columns. First row seen: '+((grid[0]||[]).filter(Boolean).slice(0,6).join(', ')||'(empty)'));
+    let added=0, updated=0, skipped=0;
+    for(let r=hr+1;r<grid.length;r++){
+      const row=grid[r]||[];
+      const first=String(row[iFirst]==null?'':row[iFirst]).trim();
+      if(!first) continue;
+      if(/^example/i.test(first)){ skipped++; continue; }        // template's sample row
+      const last=iLast>=0?String(row[iLast]==null?'':row[iLast]).trim():'';
+      const email=iMail>=0?String(row[iMail]==null?'':row[iMail]).trim():'';
+      const code=iCode>=0?String(row[iCode]==null?'':row[iCode]).trim():'';
+      const lat=parseFloat(row[iLat]), lng=parseFloat(row[iLng]);
+      if(!isFinite(lat)||!isFinite(lng)){ skipped++; continue; }
+      let c=CREWS.find(x=>norm(x.name)===norm(first) && norm(x.last||'')===norm(last));
+      if(!c && code) c=CREWS.find(x=>norm(x.code||'')===norm(code));
+      if(c){
+        c.name=first; c.last=last;
+        if(email) c.email=email;
+        if(code) c.code=code;
+        c.lat=lat; c.lng=lng;
+        updated++;
+      } else {
+        CREWS.push({name:first,last,email,code,lat,lng,active:true});
+        added++;
+      }
+    }
+    if(!added && !updated) throw new Error('No usable crew rows found'+(skipped?` (${skipped} skipped — missing name or lat/long)`:'')+'.');
+    persistCrews(); renderCrews();
+    showToast(`Crews imported: ${added} added, ${updated} updated${skipped?`, ${skipped} skipped`:''}`);
+  }catch(e){ showToast('Crew import failed: '+e.message); }
+}
 async function readKmlFromKmz(arrayBuffer){
   const dv=new DataView(arrayBuffer), u8=new Uint8Array(arrayBuffer);
   let eocd=-1;
@@ -1967,6 +2022,8 @@ document.getElementById('kmzDirBtn').onclick=()=>{
 };
 document.getElementById('zonesBtn').onclick=()=>document.getElementById('zonesFile').click();
 document.getElementById('zonesFile').onchange=e=>{ const f=e.target.files[0]; e.target.value=''; if(f) processZonesFile(f); };
+document.getElementById('crewsXlsBtn').onclick=()=>document.getElementById('crewsXlsFile').click();
+document.getElementById('crewsXlsFile').onchange=e=>{ const f=e.target.files[0]; e.target.value=''; if(f) processCrewsFile(f); };
 document.getElementById('kmzDir').onchange=e=>{
   const all=[...e.target.files]; const kmz=all.filter(f=>/\.(kmz|kml)$/i.test(f.name));
   e.target.value='';
@@ -2030,7 +2087,7 @@ document.getElementById('crewSearch').oninput=renderCrews;
 document.getElementById('addCrewBtn').onclick=()=>editCrewModal(-1);
 document.getElementById('exportCrews').onclick=()=>download('crews.json',JSON.stringify(CREWS,null,2));
 document.getElementById('importCrewsBtn').onclick=()=>document.getElementById('importCrews').click();
-document.getElementById('importCrews').onchange=e=>{ const f=e.target.files[0]; if(!f)return; const rd=new FileReader(); rd.onload=()=>{ try{const d=JSON.parse(rd.result); if(!Array.isArray(d))throw 0; CREWS=d.map(x=>({name:x.name||'',last:x.last||'',code:x.code||'',lat:x.lat,lng:x.lng,active:x.active!==false})); persistCrews(); renderCrews(); showToast('Imported '+CREWS.length+' crews'); }catch(err){ showToast('Invalid JSON'); } }; rd.readAsText(f); e.target.value=''; };
+document.getElementById('importCrews').onchange=e=>{ const f=e.target.files[0]; if(!f)return; const rd=new FileReader(); rd.onload=()=>{ try{const d=JSON.parse(rd.result); if(!Array.isArray(d))throw 0; CREWS=d.map(x=>({name:x.name||'',last:x.last||'',code:x.code||'',email:x.email||'',lat:x.lat,lng:x.lng,active:x.active!==false})); persistCrews(); renderCrews(); showToast('Imported '+CREWS.length+' crews'); }catch(err){ showToast('Invalid JSON'); } }; rd.readAsText(f); e.target.value=''; };
 document.getElementById('resetCrews').onclick=()=>{ if(confirm('Reset the crew library to the original seed?')){ CREWS=JSON.parse(JSON.stringify(CREWS_SEED)); persistCrews(); renderCrews(); showToast('Reset'); } };
 document.getElementById('crewBody').addEventListener('change',e=>{
   const t=e.target;
@@ -2043,7 +2100,7 @@ document.getElementById('crewBody').addEventListener('click',e=>{
 });
 
 // init
-const APP_VERSION='v31 · 2026-08-19';
+const APP_VERSION='v32 · 2026-08-19';
 document.getElementById('appVer').textContent=APP_VERSION;
 renderSubs(); renderCrews();
 </script>
