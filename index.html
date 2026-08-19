@@ -576,7 +576,14 @@ function loadFile01ForReview(text,name){
   const iAddrW = findCol(jobsHeader,'Address 1');
   const hasHomeRows = iAddrW>=0 && jobsRows.some(r=>/\bhome$/i.test(String(r.cells[iAddrW]||'').trim()));
   const warn=document.getElementById('trimWarn');
-  if(hasProcCol||hasHomeRows){
+  const missingCore=['Address 1','Subdiv Name'].filter(n=>findCol(jobsHeader,n)<0);
+  if(missingCore.length || jobsCols.length<4){
+    // malformed / wrong file: parsed, but barely any expected Sage columns matched
+    warn.className='';
+    warn.innerHTML=`<div class="unmatched" style="border-left-color:var(--err);background:var(--err-bg)"><span class="badge err">This doesn&rsquo;t look like a Sage export</span>
+      <div style="margin-top:6px">Only <b>${jobsCols.length}</b> of the usual columns matched${jobsCols.length?` (${jobsCols.map(c=>esc(c.name)).join(', ')})`:''}${missingCore.length?` &mdash; missing <b>${missingCore.join('</b> and <b>')}</b>, which the converter requires`:''}.
+      The file may be malformed (wrong delimiter, wrong export, or edited). Headers seen: ${esc(jobsHeader.slice(0,8).map(h=>String(h).trim()).filter(Boolean).join(' · ')||'(none)')}.</div></div>`;
+  } else if(hasProcCol||hasHomeRows){
     warn.className='';
     warn.innerHTML=`<div class="unmatched"><span class="badge warn">Heads up</span>
       This looks like an <b>already-processed file (file02)</b>${hasProcCol?' &mdash; it has a Depot/Latitude/Longitude column':''}${hasHomeRows?' &mdash; it contains crew <b>&ldquo;Home&rdquo;</b> depot rows':''}.
@@ -2127,7 +2134,7 @@ document.getElementById('crewBody').addEventListener('click',e=>{
 });
 
 // init
-const APP_VERSION='v33 · 2026-08-19';
+const APP_VERSION='v34 · 2026-08-19';
 document.getElementById('appVer').textContent=APP_VERSION;
 renderSubs(); renderCrews();
 </script>
