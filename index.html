@@ -1225,7 +1225,9 @@ function extractLocationsFromKml(kmlText){
   return out;
 }
 function matchSubForKmz(name, idx){
-  const m=matchSub(name, idx);            // exact / alias / (KMZ shorter than library)
+  let m=matchSub(name, idx);              // exact / alias / (KMZ shorter than library)
+  if(m.sub) return m;
+  m=matchSub(cleanNewName(name), idx);    // retry with stray chars / lot codes cleaned ("Parkview at Hamlin." / "Everbe 1A-3")
   if(m.sub) return m;
   const n=norm(name);                     // KMZ often longer ("... Phase 3") -> longest library prefix wins
   let best=null, bestLen=0;
@@ -1234,10 +1236,13 @@ function matchSubForKmz(name, idx){
   return best ? {sub:best, how:'phase'} : {sub:null, how:'miss'};
 }
 function stripPhase(n){ return String(n||'').replace(/\s+(phase|ph|sht|sheet|unit|pod|parcel|section|sec)\s*\d.*$/i,'').trim()||String(n||''); }
-/* clean a KMZ-derived sub name: strip phase suffixes plus stray leading/trailing
-   separators ("/Astoria North" -> "Astoria North") */
+/* clean a KMZ-derived sub name: strip phase suffixes, image extensions, trailing
+   digit-led lot/section codes ("Everbe 1A-10" -> "Everbe"), and stray separators */
 function cleanNewName(s){
-  const v=stripPhase(s).replace(/^[\s\/\\\-_.,;:]+/,'').replace(/[\s\/\\\-_.,;:]+$/,'').trim();
+  let v=stripPhase(s)
+    .replace(/\.(png|jpe?g|pdf|tiff?)$/i,'')
+    .replace(/(\s+\d+[a-z]?(?:-\d+[a-z]?)?)+$/i,'')            // trailing digit-led codes: " 2", " 1A", " 1A-10"
+    .replace(/^[\s\/\\\-_.,;:]+/,'').replace(/[\s\/\\\-_.,;:]+$/,'').trim();
   return v||String(s||'').trim();
 }
 function rnd(v){ return Math.round(Number(v)*1e6)/1e6; }
@@ -1826,7 +1831,7 @@ document.getElementById('crewBody').addEventListener('click',e=>{
 });
 
 // init
-const APP_VERSION='v24 · 2026-08-19';
+const APP_VERSION='v25 · 2026-08-19';
 document.getElementById('appVer').textContent=APP_VERSION;
 renderSubs(); renderCrews();
 </script>
