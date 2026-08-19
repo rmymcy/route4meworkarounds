@@ -89,7 +89,13 @@
   .modal .mh{padding:18px 22px;border-bottom:1px solid var(--line)}
   .modal .mh h3{margin:0;font-size:16px}
   .modal .mb{padding:18px 22px}
-  .modal .mf{padding:14px 22px;border-top:1px solid var(--line);display:flex;gap:10px;justify-content:flex-end;position:sticky;bottom:0;background:var(--panel)}
+  .modal .mf{padding:14px 22px;border-top:1px solid var(--line);display:flex;gap:10px;justify-content:flex-end;position:sticky;bottom:0;background:var(--panel);z-index:20}
+  /* KMZ review card: info left, mini map right; isolate the map so Leaflet's
+     internal z-indexes can't escape over the modal chrome */
+  .kz-grid{display:grid;grid-template-columns:minmax(0,1fr) 280px;gap:12px;align-items:stretch}
+  .kz-mini{height:150px;border:1px solid var(--line);border-radius:8px;background:#eaeaed;display:flex;align-items:center;justify-content:center;
+    color:var(--muted);font-size:12px;position:relative;z-index:0;isolation:isolate;overflow:hidden}
+  @media(max-width:640px){.kz-grid{grid-template-columns:1fr}.kz-mini{height:160px}}
   .unmatched{border:1px solid var(--warn-bg);border-left:3px solid var(--warn);border-radius:8px;padding:12px;margin-bottom:10px;background:#fffdf8}
   .unmatched .nm{font-weight:700;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px}
   .unmatched .cnt{color:var(--muted);font-size:12px}
@@ -1581,16 +1587,20 @@ function openKmzReview(locs, errs, fileCount, noiseSkipped, refNote){
   const cardHtml=r=>{
     const search=norm([r.newName,r.subName,r.name,r.src,r.dir].filter(Boolean).join(' '));
     return `<div class="review-card" data-kz="${r.i}" data-search="${esc(search)}">
-    <div class="review-head">
-      ${r.status==='new'
-        ? `<span class="badge ok">new sub</span>${r.noise?'<span class="badge warn">noise?</span>':''}<input type="text" data-kzname="${r.i}" value="${esc(r.newName)}" style="flex:1;min-width:200px;font-weight:700">`
-        : `<span class="badge warn">fill blank</span><span class="raw">${esc(r.subName)}</span>`}
-      <label style="margin-left:auto;display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
-        <input type="checkbox" data-kzapply="${r.i}" ${r.apply?'checked':''}> ${r.status==='new'?'create':'fill'}</label>
+    <div class="kz-grid">
+      <div style="min-width:0">
+        <div class="review-head">
+          ${r.status==='new'
+            ? `<span class="badge ok">new sub</span>${r.noise?'<span class="badge warn">noise?</span>':''}<input type="text" data-kzname="${r.i}" value="${esc(r.newName)}" style="flex:1;min-width:160px;font-weight:700">`
+            : `<span class="badge warn">fill blank</span><span class="raw">${esc(r.subName)}</span>`}
+          <label style="margin-left:auto;display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
+            <input type="checkbox" data-kzapply="${r.i}" ${r.apply?'checked':''}> ${r.status==='new'?'create':'fill'}</label>
+        </div>
+        ${r.similar?`<div style="font-size:11.5px;margin:2px 0 6px;color:var(--warn)"><b>Similar to existing sub:</b> ${esc(r.similar.name)} (${r.similar.score.toFixed(2)}) &mdash; possible typo/variant; rename to match instead of creating a duplicate</div>`:''}
+        <div class="muted" style="font-size:11px">${r.dir?`<b>${esc(r.dir)}</b><br>`:''}${esc(r.src)}<br>map name: ${esc(r.name)}<br><span class="pin">${rnd(r.lat)}, ${rnd(r.lng)}</span></div>
+      </div>
+      <div id="kzmap_${r.i}" class="kz-mini">${mapAvailable()?'':'map needs internet — coordinates are still used'}</div>
     </div>
-    ${r.similar?`<div style="font-size:11.5px;margin:2px 0 6px;color:var(--warn)"><b>Similar to existing sub:</b> ${esc(r.similar.name)} (${r.similar.score.toFixed(2)}) &mdash; possible typo/variant; rename to match instead of creating a duplicate</div>`:''}
-    <div class="muted" style="font-size:11px;margin-bottom:6px">${r.dir?`<b>${esc(r.dir)}</b> &middot; `:''}${esc(r.src)} &middot; map name: ${esc(r.name)} &middot; <span class="pin">${rnd(r.lat)}, ${rnd(r.lng)}</span></div>
-    <div id="kzmap_${r.i}" style="height:170px;border:1px solid var(--line);border-radius:8px;background:#eaeaed;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:12px">${mapAvailable()?'':'map needs internet — coordinates above are still used'}</div>
   </div>`;};
   let noiseOpen=false;
   function renderKz(){
@@ -1844,7 +1854,7 @@ document.getElementById('crewBody').addEventListener('click',e=>{
 });
 
 // init
-const APP_VERSION='v26 · 2026-08-19';
+const APP_VERSION='v27 · 2026-08-19';
 document.getElementById('appVer').textContent=APP_VERSION;
 renderSubs(); renderCrews();
 </script>
