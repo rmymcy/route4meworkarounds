@@ -1261,6 +1261,11 @@ let KMZNOISE_PATTERNS=load(K_KMZNOISEPAT,true);
    Overlays (site plans) are never affected. 0 disables. */
 const K_KMZMULTI='r4m_kmzmulti_v1';
 let KMZ_MULTI_CAP=load(K_KMZMULTI,5);
+/* Folder names the scan never descends into (segment match, case-insensitive). */
+const K_KMZIGNORE='r4m_kmzignoredirs_v1';
+let KMZ_IGNORE_DIRS=load(K_KMZIGNORE,['_Archive']);
+function isIgnoredDirName(name){ return KMZ_IGNORE_DIRS.some(d=>norm(d)===norm(name)); }
+function pathHasIgnoredDir(path){ return String(path||'').split('/').some(isIgnoredDirName); }
 function isNoiseName(name){
   const cleaned=norm(String(name==null?'':name).replace(/\.(kmz|kml)$/i,'').replace(/[_\-.]/g,' ')).trim();
   const n=' '+cleaned+' ';
@@ -1289,17 +1294,22 @@ function openNoiseEditor(onSave){
         <span>Skip files with more than</span>
         <input type="number" id="nz_cap" value="${KMZ_MULTI_CAP}" min="0" style="width:70px">
         <span>point pins <span class="muted">(reference databases like benchmark sets; 0 = off; site-plan overlays are never skipped)</span></span></label>
+      <div style="margin-top:10px">
+        <label class="fld">Ignore folders (never scanned; comma-separated folder names)</label>
+        <input type="text" id="nz_dirs" value="${esc(KMZ_IGNORE_DIRS.join(', '))}" placeholder="_Archive">
+      </div>
       <button class="small" id="nz_reset" style="margin-top:8px">Restore defaults</button>
     </div>
     <div class="mf"><button id="nz_cancel">Cancel</button><button class="primary" id="nz_save">Save</button></div>
   </div></div>`;
-  document.getElementById('nz_reset').onclick=()=>{ document.getElementById('nz_text').value=KMZNOISE_DEFAULT.join('\n'); document.getElementById('nz_pat').checked=true; document.getElementById('nz_cap').value=5; };
+  document.getElementById('nz_reset').onclick=()=>{ document.getElementById('nz_text').value=KMZNOISE_DEFAULT.join('\n'); document.getElementById('nz_pat').checked=true; document.getElementById('nz_cap').value=5; document.getElementById('nz_dirs').value='_Archive'; };
   document.getElementById('nz_cancel').onclick=()=>root2.innerHTML='';
   document.getElementById('nz_save').onclick=()=>{
     KMZNOISE=document.getElementById('nz_text').value.split('\n').map(x=>x.trim()).filter(Boolean);
     KMZNOISE_PATTERNS=document.getElementById('nz_pat').checked;
     KMZ_MULTI_CAP=Math.max(0, parseInt(document.getElementById('nz_cap').value)||0);
-    persistKmzNoise(); save(K_KMZNOISEPAT,KMZNOISE_PATTERNS); save(K_KMZMULTI,KMZ_MULTI_CAP);
+    KMZ_IGNORE_DIRS=document.getElementById('nz_dirs').value.split(',').map(x=>x.trim()).filter(Boolean);
+    persistKmzNoise(); save(K_KMZNOISEPAT,KMZNOISE_PATTERNS); save(K_KMZMULTI,KMZ_MULTI_CAP); save(K_KMZIGNORE,KMZ_IGNORE_DIRS);
     root2.innerHTML=''; showToast('Noise filter saved');
     if(onSave) onSave();
   };
@@ -1335,11 +1345,11 @@ async function scanFolderModern(dirHandle){
     idbSet('lastDir',dirHandle).then(()=>document.getElementById('kmzRescanBtn').classList.remove('hide'));
   }
   KMZ_CANCEL=false;
-  const items=[]; let dirs=0, seen=0, denied=0, lastPaint=0;
+  const items=[]; let dirs=0, seen=0, denied=0, lastPaint=0, ignoredDirs=0;
   const queue=[{dh:dirHandle,path:dirHandle.name||''}];
   let active=0;
   const paint=()=>{ const now=Date.now(); if(now-lastPaint>150){ lastPaint=now;
-    setKmzStatus(`Crawling (parallel)&hellip; <b>${dirs}</b> folder(s) · <b>${seen}</b> item(s) · <b>${items.length}</b> KMZ/KML found${denied?` · <span style="color:var(--warn)">${denied} denied</span>`:''}${KMZ_STOP_BTN}`); } };
+    setKmzStatus(`Crawling (parallel)&hellip; <b>${dirs}</b> folder(s) · <b>${seen}</b> item(s) · <b>${items.length}</b> KMZ/KML found${ignoredDirs?` · ${ignoredDirs} folder(s) ignored`:''}${denied?` · <span style="color:var(--warn)">${denied} denied</span>`:''}${KMZ_STOP_BTN}`); } };
   async function worker(){
     while(true){
       if(KMZ_CANCEL){ queue.length=0; return; }
@@ -1355,7 +1365,7 @@ async function scanFolderModern(dirHandle){
           if(r.done) break;
           const entry=r.value; seen++; paint();
           const p=job.path+'/'+entry.name;
-          if(entry.kind==='directory') queue.push({dh:entry,path:p});
+          if(entry.kind==='directory'){ if(isIgnoredDirName(entry.name)) ignoredDirs++; else queue.push({dh:entry,path:p}); }
           else if(/\.(kmz|kml)$/i.test(entry.name)) items.push({name:entry.name, path:p, getFile:()=>entry.getFile()});
         }
       } finally{ active--; }
@@ -1365,13 +1375,14 @@ async function scanFolderModern(dirHandle){
   await Promise.all(Array.from({length:12},worker));
   const stopped=KMZ_CANCEL;
   const deniedNote=denied?` · <span style="color:var(--warn)">${denied} unreadable/denied</span>`:'';
+  const ignoredNote=ignoredDirs?` · ${ignoredDirs} folder(s) ignored (${esc(KMZ_IGNORE_DIRS.join(', '))})`:'';
   if(!items.length){
     setKmzStatus(stopped
       ? `<b>Scan stopped.</b> ${dirs} folder(s) crawled &mdash; no .kmz / .kml found yet.`
-      : `<b>Scan finished:</b> crawled ${dirs} folder(s), ${seen} item(s) &mdash; <b>no .kmz / .kml found</b>${deniedNote}. Check the folder level you picked.`);
+      : `<b>Scan finished:</b> crawled ${dirs} folder(s), ${seen} item(s) &mdash; <b>no .kmz / .kml found</b>${ignoredNote}${deniedNote}. Check the folder level you picked.`);
     return;
   }
-  setKmzStatus(`${stopped?'<b>Crawl stopped early</b> — keeping what was found. ':'Crawl done: '}${dirs} folder(s), ${seen} item(s)${deniedNote}. Reading ${items.length} KMZ/KML&hellip;${KMZ_STOP_BTN}`);
+  setKmzStatus(`${stopped?'<b>Crawl stopped early</b> — keeping what was found. ':'Crawl done: '}${dirs} folder(s), ${seen} item(s)${ignoredNote}${deniedNote}. Reading ${items.length} KMZ/KML&hellip;${KMZ_STOP_BTN}`);
   await processKmzItems(items, stopped);
 }
 
@@ -1432,7 +1443,9 @@ document.addEventListener('click',e=>{
   else if(e.target.closest('[data-report]')) exportScanReport();
 });
 function processKmzFiles(files){ // classic-picker path: wrap plain Files as items
-  return processKmzItems([...files].map(f=>({name:f.name, path:f.webkitRelativePath||f.name, getFile:async()=>f})));
+  return processKmzItems([...files]
+    .filter(f=>!pathHasIgnoredDir(f.webkitRelativePath||''))
+    .map(f=>({name:f.name, path:f.webkitRelativePath||f.name, getFile:async()=>f})));
 }
 async function processKmzItems(items, partialCrawl){
   KMZ_CANCEL=false; // Stop during the read stage works independently of the crawl
