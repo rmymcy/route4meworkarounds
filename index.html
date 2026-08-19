@@ -262,6 +262,8 @@
         <input type="file" id="kmzFile" accept=".kmz,.kml" multiple class="hide">
         <button class="small" id="kmzDirBtn">Scan folder&hellip;</button>
         <input type="file" id="kmzDir" webkitdirectory directory multiple class="hide">
+        <button class="small" id="zonesBtn" title="import Geotab zones export (customer zones only)">Zones (Excel)&hellip;</button>
+        <input type="file" id="zonesFile" accept=".xlsx,.csv" class="hide">
         <div class="menu-wrap">
           <button class="small" id="subsMenuBtn" title="more">&#8943;</button>
           <div class="menu" id="subsMenu">
@@ -1176,6 +1178,124 @@ async function inflateRaw(bytes){
   const stream=new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
   return new Uint8Array(await new Response(stream).arrayBuffer());
 }
+/* ---- generic ZIP helpers (xlsx is a zip of XML) ---- */
+function zipEntries(arrayBuffer){
+  const dv=new DataView(arrayBuffer), u8=new Uint8Array(arrayBuffer);
+  let eocd=-1;
+  for(let i=u8.length-22;i>=0;i--){ if(dv.getUint32(i,true)===0x06054b50){ eocd=i; break; } }
+  if(eocd<0) throw new Error('Not a valid .xlsx file.');
+  const cdOff=dv.getUint32(eocd+16,true), cdCount=dv.getUint16(eocd+10,true);
+  let p=cdOff; const out=[];
+  for(let n=0;n<cdCount;n++){
+    if(dv.getUint32(p,true)!==0x02014b50) break;
+    const method=dv.getUint16(p+10,true), compSize=dv.getUint32(p+20,true);
+    const nameLen=dv.getUint16(p+28,true), extraLen=dv.getUint16(p+30,true), commentLen=dv.getUint16(p+32,true);
+    const localOff=dv.getUint32(p+42,true);
+    out.push({name:new TextDecoder().decode(u8.subarray(p+46,p+46+nameLen)), method, compSize, localOff});
+    p+=46+nameLen+extraLen+commentLen;
+  }
+  return out;
+}
+async function zipExtract(arrayBuffer, entry){
+  const dv=new DataView(arrayBuffer), u8=new Uint8Array(arrayBuffer);
+  if(dv.getUint32(entry.localOff,true)!==0x04034b50) throw new Error('Corrupt zip entry.');
+  const dataStart=entry.localOff+30+dv.getUint16(entry.localOff+26,true)+dv.getUint16(entry.localOff+28,true);
+  const comp=u8.subarray(dataStart, dataStart+entry.compSize);
+  return entry.method===0?comp:await inflateRaw(comp);
+}
+/* Parse the first worksheet of an .xlsx into a 2-D string grid. */
+async function parseXlsxGrid(arrayBuffer){
+  const entries=zipEntries(arrayBuffer);
+  const sheet=entries.filter(e=>/^xl\/worksheets\/sheet\d+\.xml$/i.test(e.name))
+    .sort((a,b)=>a.name.localeCompare(b.name,undefined,{numeric:true}))[0];
+  if(!sheet) throw new Error('No worksheet found inside the Excel file.');
+  let shared=[];
+  const ss=entries.find(e=>e.name.toLowerCase()==='xl/sharedstrings.xml');
+  if(ss){
+    const doc=new DOMParser().parseFromString(new TextDecoder().decode(await zipExtract(arrayBuffer,ss)),'application/xml');
+    shared=[...doc.getElementsByTagNameNS('*','si')].map(si=>si.textContent);
+  }
+  const doc=new DOMParser().parseFromString(new TextDecoder().decode(await zipExtract(arrayBuffer,sheet)),'application/xml');
+  if(doc.getElementsByTagName('parsererror').length) throw new Error('Couldn’t read the worksheet XML.');
+  const rows=[];
+  for(const rowEl of doc.getElementsByTagNameNS('*','row')){
+    const cells=[];
+    let auto=0;
+    for(const c of rowEl.getElementsByTagNameNS('*','c')){
+      const ref=c.getAttribute('r')||'';
+      const letters=(ref.match(/^[A-Z]+/i)||[])[0];
+      let idx=auto;
+      if(letters){ idx=0; for(const ch of letters.toUpperCase()) idx=idx*26+(ch.charCodeAt(0)-64); idx--; }
+      auto=idx+1;
+      const t=c.getAttribute('t');
+      let v='';
+      if(t==='inlineStr') v=c.textContent;
+      else{
+        const vEl=c.getElementsByTagNameNS('*','v')[0];
+        v=vEl?vEl.textContent:'';
+        if(t==='s') v=shared[+v]!=null?shared[+v]:'';
+      }
+      cells[idx]=v;
+    }
+    rows.push(cells);
+  }
+  return rows;
+}
+
+/* ---- Geotab zones import: name + centroid lat/long, customer zones only ---- */
+async function processZonesFile(f){
+  try{
+    setKmzStatus(`Reading ${esc(f.name)}&hellip;`);
+    const grid=/\.csv$/i.test(f.name) ? parseCSV(await f.text()) : await parseXlsxGrid(await f.arrayBuffer());
+    // find the header row: needs a latitude and a longitude column
+    let hr=-1, iName=-1, iLat=-1, iLng=-1, iType=-1;
+    for(let r=0;r<Math.min(12,grid.length);r++){
+      const cells=(grid[r]||[]).map(c=>norm(c));
+      const li=cells.findIndex(c=>/lat/.test(c));
+      const gi=cells.findIndex(c=>/(lon|lng)/.test(c));
+      if(li>=0 && gi>=0 && li!==gi){
+        hr=r; iLat=li; iLng=gi;
+        iName=cells.findIndex(c=>c==='name' || c==='zone name');
+        if(iName<0) iName=cells.findIndex(c=>/name/.test(c));
+        iType=cells.findIndex(c=>/type/.test(c));
+        break;
+      }
+    }
+    if(hr<0) throw new Error('No Latitude/Longitude columns found. First row seen: '+((grid[0]||[]).filter(Boolean).slice(0,8).join(', ')||'(empty)'));
+    if(iName<0) throw new Error('No Name column found next to the coordinates.');
+    const locs=[]; let nonCustomer=0, badCoord=0;
+    LAST_SCAN_REPORT=[];
+    for(let r=hr+1;r<grid.length;r++){
+      const row=grid[r]||[];
+      const name=String(row[iName]==null?'':row[iName]).trim();
+      if(!name) continue;
+      const type=iType>=0?String(row[iType]==null?'':row[iType]).trim():'';
+      if(iType>=0 && !/customer/i.test(type)){
+        nonCustomer++;
+        LAST_SCAN_REPORT.push({folder:'Geotab zones',file:f.name,status:'skipped — not a customer zone',map:name,kind:'zone',lat:'',lng:'',resolution:'',note:type});
+        continue;
+      }
+      const lat=parseFloat(row[iLat]), lng=parseFloat(row[iLng]);
+      if(!isFinite(lat)||!isFinite(lng)||(lat===0&&lng===0)){
+        badCoord++;
+        LAST_SCAN_REPORT.push({folder:'Geotab zones',file:f.name,status:'error',map:name,kind:'zone',lat:'',lng:'',resolution:'',note:'bad coordinates'});
+        continue;
+      }
+      const rep={folder:'Geotab zones',file:f.name,status:'zone',map:name,kind:'zone',lat:rnd(lat),lng:rnd(lng),resolution:'',note:type};
+      LAST_SCAN_REPORT.push(rep);
+      locs.push({name,lat,lng,kind:'zone',src:f.name,dir:'Geotab zones',_rep:rep});
+    }
+    const notes=[];
+    if(nonCustomer) notes.push(`${nonCustomer} non-customer zone(s) skipped`);
+    if(iType<0) notes.push('no zone-type column — imported all zones');
+    if(badCoord) notes.push(`${badCoord} with bad coordinates`);
+    if(!locs.length){
+      setKmzStatus(`<b>Zones import:</b> no customer zones with usable coordinates in ${esc(f.name)}${notes.length?' · '+esc(notes.join(' · ')):''}.${KMZ_REPORT_BTN}`);
+      return;
+    }
+    openKmzReview(locs, [], null, 0, ` · ${locs.length} customer zone(s) from ${esc(f.name)}${notes.length?' · '+esc(notes.join(' · ')):''}`);
+  }catch(e){ setKmzStatus(`<b>Zones import failed:</b> ${esc(e.message)}`); }
+}
 async function readKmlFromKmz(arrayBuffer){
   const dv=new DataView(arrayBuffer), u8=new Uint8Array(arrayBuffer);
   let eocd=-1;
@@ -1818,6 +1938,8 @@ document.getElementById('kmzDirBtn').onclick=()=>{
   setKmzStatus(`Waiting for folder selection&hellip; if the browser asks to &ldquo;Upload N files&rdquo;, click Upload.`);
   document.getElementById('kmzDir').click();
 };
+document.getElementById('zonesBtn').onclick=()=>document.getElementById('zonesFile').click();
+document.getElementById('zonesFile').onchange=e=>{ const f=e.target.files[0]; e.target.value=''; if(f) processZonesFile(f); };
 document.getElementById('kmzDir').onchange=e=>{
   const all=[...e.target.files]; const kmz=all.filter(f=>/\.(kmz|kml)$/i.test(f.name));
   e.target.value='';
@@ -1894,7 +2016,7 @@ document.getElementById('crewBody').addEventListener('click',e=>{
 });
 
 // init
-const APP_VERSION='v28 · 2026-08-19';
+const APP_VERSION='v29 · 2026-08-19';
 document.getElementById('appVer').textContent=APP_VERSION;
 renderSubs(); renderCrews();
 </script>
