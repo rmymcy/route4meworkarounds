@@ -1285,17 +1285,36 @@ async function processZonesFile(f){
       LAST_SCAN_REPORT.push(rep);
       locs.push({name,lat,lng,kind:'zone',src:f.name,dir:'Geotab zones',_rep:rep});
     }
+    // territory filter: company-wide exports carry other regions' zones. Your own
+    // library defines the service area — keep zones within ZONES_NEAR_MI of any
+    // library sub that has coordinates; park the rest behind a button.
+    const geoSubs=SUBS.filter(subHasGeo);
+    let near=locs, far=[];
+    if(geoSubs.length){
+      near=[];
+      for(const L of locs){
+        let ok=false;
+        for(const s of geoSubs){ if(haversineMi(L.lat,L.lng,+s.lat,+s.lng)<=ZONES_NEAR_MI){ ok=true; break; } }
+        if(ok) near.push(L);
+        else{ far.push(L); if(L._rep){ L._rep.status='skipped — outside territory'; L._rep.note=(L._rep.note?L._rep.note+' · ':'')+`>${ZONES_NEAR_MI} mi from any library sub`; } }
+      }
+    }
+    ZONES_FAR_PENDING=far;
     const notes=[];
     if(nonCustomer) notes.push(`${nonCustomer} non-customer zone(s) skipped`);
+    if(far.length) notes.push(`${far.length} outside your territory (&gt;${ZONES_NEAR_MI} mi from any library sub)`);
     if(iType<0) notes.push('no zone-type column — imported all zones');
     if(badCoord) notes.push(`${badCoord} with bad coordinates`);
-    if(!locs.length){
-      setKmzStatus(`<b>Zones import:</b> no customer zones with usable coordinates in ${esc(f.name)}${notes.length?' · '+esc(notes.join(' · ')):''}.${KMZ_REPORT_BTN}`);
+    const farBtn = far.length?` <button class="small" data-zones-far>Review far zones (${far.length})</button>`:'';
+    if(!near.length){
+      setKmzStatus(`<b>Zones import:</b> no customer zones inside your territory in ${esc(f.name)}${notes.length?' · '+notes.join(' · '):''}.${farBtn}${KMZ_REPORT_BTN}`);
       return;
     }
-    openKmzReview(locs, [], null, 0, ` · ${locs.length} customer zone(s) from ${esc(f.name)}${notes.length?' · '+esc(notes.join(' · ')):''}`);
+    openKmzReview(near, [], null, 0, ` · ${near.length} customer zone(s) from ${esc(f.name)}${notes.length?' · '+notes.join(' · '):''}${farBtn}`);
   }catch(e){ setKmzStatus(`<b>Zones import failed:</b> ${esc(e.message)}`); }
 }
+const ZONES_NEAR_MI=75;
+let ZONES_FAR_PENDING=[];
 async function readKmlFromKmz(arrayBuffer){
   const dv=new DataView(arrayBuffer), u8=new Uint8Array(arrayBuffer);
   let eocd=-1;
@@ -1589,6 +1608,11 @@ document.addEventListener('click',e=>{
   else if(e.target.closest('[data-dismiss]')) setKmzStatus('');
   else if(e.target.closest('[data-noise-edit]')) openNoiseEditor();
   else if(e.target.closest('[data-report]')) exportScanReport();
+});
+document.addEventListener('click',e=>{
+  if(!e.target.closest||!e.target.closest('[data-zones-far]')) return;
+  if(ZONES_FAR_PENDING.length) openKmzReview(ZONES_FAR_PENDING, [], null, 0, ` · ${ZONES_FAR_PENDING.length} far zone(s) — outside your usual territory`);
+  else showToast('No far zones pending — run a zones import first');
 });
 function processKmzFiles(files){ // classic-picker path: wrap plain Files as items
   return processKmzItems([...files]
@@ -2016,7 +2040,7 @@ document.getElementById('crewBody').addEventListener('click',e=>{
 });
 
 // init
-const APP_VERSION='v29 · 2026-08-19';
+const APP_VERSION='v30 · 2026-08-19';
 document.getElementById('appVer').textContent=APP_VERSION;
 renderSubs(); renderCrews();
 </script>
