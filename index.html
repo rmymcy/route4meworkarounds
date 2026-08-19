@@ -1229,6 +1229,12 @@ function matchSubForKmz(name, idx){
   return best ? {sub:best, how:'phase'} : {sub:null, how:'miss'};
 }
 function stripPhase(n){ return String(n||'').replace(/\s+(phase|ph|sht|sheet|unit|pod|parcel|section|sec)\s*\d.*$/i,'').trim()||String(n||''); }
+/* clean a KMZ-derived sub name: strip phase suffixes plus stray leading/trailing
+   separators ("/Astoria North" -> "Astoria North") */
+function cleanNewName(s){
+  const v=stripPhase(s).replace(/^[\s\/\\\-_.,;:]+/,'').replace(/[\s\/\\\-_.,;:]+$/,'').trim();
+  return v||String(s||'').trim();
+}
 function rnd(v){ return Math.round(Number(v)*1e6)/1e6; }
 /* ---- remember the last scanned folder handle (IndexedDB) for one-click rescan ---- */
 function idbOpen(){ return new Promise((res,rej)=>{ const r=indexedDB.open('r4m_tool',1);
@@ -1245,7 +1251,7 @@ const KMZ_STOP_BTN=` <button class="small danger" data-stop style="margin-left:1
 
 /* ---- noise filter: word list that marks non-subdivision KMZs (editable, persisted) ---- */
 const K_KMZNOISE='r4m_kmznoise_v1';
-const KMZNOISE_DEFAULT=['asbuilt','as built','benchmark','topo','bndy','boundary','control','flood','fema','easement','esmt','utility','utilities','drainage','lot','block','exhibit','detail','sketch'];
+const KMZNOISE_DEFAULT=['asbuilt','as built','benchmark','topo','bndy','boundary','control','flood','fema','easement','esmt','utility','utilities','drainage','lot','block','exhibit','detail','sketch','untitled','place marker'];
 let KMZNOISE=load(K_KMZNOISE,KMZNOISE_DEFAULT);
 function persistKmzNoise(){ save(K_KMZNOISE,KMZNOISE); }
 const K_KMZNOISEPAT='r4m_kmznoisepat_v1';
@@ -1517,7 +1523,10 @@ function openKmzReview(locs, errs, fileCount, noiseSkipped, refNote){
     const hasCoord = sub && subHasGeo(sub);
     const status = !sub ? 'new' : (hasCoord ? 'exists' : 'fill');
     const noise = status==='new' && isNoiseName(L.name);
-    return {...L, i, subName: sub?sub.name:null, status, noise, apply: status!=='exists' && !noise, newName: stripPhase(L.name)};
+    const newName=cleanNewName(L.name);
+    let similar=null;
+    if(status==='new' && !noise){ const sc=scoreSubs(newName)[0]; if(sc && sc.score>=0.85) similar=sc; }
+    return {...L, i, subName: sub?sub.name:null, status, noise, apply: status!=='exists' && !noise, newName, similar};
   });
   for(const r of all){ if(r._rep) r._rep.resolution =
     r.status==='exists' ? 'already in library: '+r.subName
@@ -1552,6 +1561,7 @@ function openKmzReview(locs, errs, fileCount, noiseSkipped, refNote){
       <label style="margin-left:auto;display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
         <input type="checkbox" data-kzapply="${r.i}" ${r.apply?'checked':''}> ${r.status==='new'?'create':'fill'}</label>
     </div>
+    ${r.similar?`<div style="font-size:11.5px;margin:2px 0 6px;color:var(--warn)"><b>Similar to existing sub:</b> ${esc(r.similar.name)} (${r.similar.score.toFixed(2)}) &mdash; possible typo/variant; rename to match instead of creating a duplicate</div>`:''}
     <div class="muted" style="font-size:11px;margin-bottom:6px">${r.dir?`<b>${esc(r.dir)}</b> &middot; `:''}${esc(r.src)} &middot; map name: ${esc(r.name)} &middot; <span class="pin">${rnd(r.lat)}, ${rnd(r.lng)}</span></div>
     <div id="kzmap_${r.i}" style="height:170px;border:1px solid var(--line);border-radius:8px;background:#eaeaed;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:12px">${mapAvailable()?'':'map needs internet — coordinates above are still used'}</div>
   </div>`;};
