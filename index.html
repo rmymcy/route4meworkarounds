@@ -1244,6 +1244,14 @@ function cleanNewName(s){
   return v||String(s||'').trim();
 }
 function rnd(v){ return Math.round(Number(v)*1e6)/1e6; }
+/* alias-confirm rule: fuzzy name match >= score AND pin within N miles */
+const ALIAS_SCORE=0.70, ALIAS_MILES=1;
+function haversineMi(lat1,lng1,lat2,lng2){
+  const R=3958.8, toR=x=>x*Math.PI/180;
+  const dLat=toR(lat2-lat1), dLng=toR(lng2-lng1);
+  const a=Math.sin(dLat/2)**2 + Math.cos(toR(lat1))*Math.cos(toR(lat2))*Math.sin(dLng/2)**2;
+  return 2*R*Math.asin(Math.sqrt(a));
+}
 /* ---- crawl/read cancellation ---- */
 let KMZ_CANCEL=false;
 function cancelKmzScan(){ KMZ_CANCEL=true; }
@@ -1557,9 +1565,19 @@ function openKmzReview(locs, errs, fileCount, noiseSkipped, refNote){
     const status = !sub ? 'new' : (hasCoord ? 'exists' : 'fill');
     const noise = status==='new' && isNoiseName(L.name);
     const newName=cleanNewName(L.name);
-    let similar=null;
-    if(status==='new' && !noise){ const sc=scoreSubs(newName)[0]; if(sc && sc.score>=0.85) similar=sc; }
-    return {...L, i, subName: sub?sub.name:null, status, noise, apply: status!=='exists' && !noise, newName, similar};
+    let similar=null, aliasSuggest=null;
+    if(status==='new' && !noise){
+      const sc=scoreSubs(newName)[0]; if(sc && sc.score>=0.85) similar=sc;
+      // one-click alias confirm: name >=0.70 similar AND pin within 1 mile of the library sub
+      for(const c of scoreSubs(newName).filter(x=>x.score>=ALIAS_SCORE).slice(0,5)){
+        const s=SUBS.find(x=>x.name===c.name);
+        if(s && subHasGeo(s)){
+          const d=haversineMi(L.lat,L.lng,+s.lat,+s.lng);
+          if(d<=ALIAS_MILES){ aliasSuggest={name:s.name,score:c.score,dist:d}; break; }
+        }
+      }
+    }
+    return {...L, i, subName: sub?sub.name:null, status, noise, apply: status!=='exists' && !noise, newName, similar, aliasSuggest};
   });
   for(const r of all){ if(r._rep) r._rep.resolution =
     r.status==='exists' ? 'already in library: '+r.subName
@@ -1596,18 +1614,21 @@ function openKmzReview(locs, errs, fileCount, noiseSkipped, refNote){
           <label style="margin-left:auto;display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
             <input type="checkbox" data-kzapply="${r.i}" ${r.apply?'checked':''}> ${r.status==='new'?'create':'fill'}</label>
         </div>
-        ${r.similar?`<div style="font-size:11.5px;margin:2px 0 6px;color:var(--warn)"><b>Similar to existing sub:</b> ${esc(r.similar.name)} (${r.similar.score.toFixed(2)}) &mdash; possible typo/variant; rename to match instead of creating a duplicate</div>`:''}
+        ${r.aliasSuggest?`<div style="font-size:11.5px;margin:2px 0 6px;padding:7px 9px;border:1px solid var(--warn);border-radius:8px;background:var(--warn-bg)">
+            Matches <b>${esc(r.aliasSuggest.name)}</b> (${r.aliasSuggest.score.toFixed(2)} &middot; ${r.aliasSuggest.dist<0.1?'&lt;0.1':r.aliasSuggest.dist.toFixed(1)} mi away)
+            <button class="small primary" data-kzalias="${r.i}" style="margin-left:8px">Same sub &mdash; save alias</button></div>`
+          : r.similar?`<div style="font-size:11.5px;margin:2px 0 6px;color:var(--warn)"><b>Similar to existing sub:</b> ${esc(r.similar.name)} (${r.similar.score.toFixed(2)}) &mdash; possible typo/variant; rename to match instead of creating a duplicate</div>`:''}
         <div class="muted" style="font-size:11px">${r.dir?`<b>${esc(r.dir)}</b><br>`:''}${esc(r.src)}<br>map name: ${esc(r.name)}<br><span class="pin">${rnd(r.lat)}, ${rnd(r.lng)}</span></div>
       </div>
       <div id="kzmap_${r.i}" class="kz-mini">${mapAvailable()?'':'map needs internet — coordinates are still used'}</div>
     </div>
   </div>`;};
-  let noiseOpen=false;
+  let noiseOpen=false, aliasedN=0;
   function renderKz(){
     const mainRows=kmzRows.filter(r=>!r.noise), noiseRows=kmzRows.filter(r=>r.noise);
     setKmzStatus(`<b>Scan finished:</b> ${fileCount!=null?fileCount+' file(s) read · ':''}<b>${mainRows.length}</b> to review${noiseRows.length?` · ${noiseRows.length} more look like noise`:''} · <b>${skipped}</b> already in the library${noiseFileNote}${refNote}${errs.length?` · <span style="color:var(--warn)">${errs.length} unreadable</span>`:''}${KMZ_REPORT_BTN}`);
     root.innerHTML=`<div class="backdrop"><div class="modal" style="max-width:720px"><div class="mh"><h3>New subs found in KMZ scan</h3>
-      <div class="muted" style="font-size:13px;margin-top:4px">${mainRows.length} suggestion(s) &middot; ${noiseRows.length} noise-filtered &middot; ${skipped} already in the library${noiseSkipped?` &middot; ${noiseSkipped} files skipped unread`:''}.
+      <div class="muted" style="font-size:13px;margin-top:4px">${mainRows.length} suggestion(s) &middot; ${noiseRows.length} noise-filtered &middot; ${skipped} already in the library${aliasedN?` &middot; <b>${aliasedN} aliased</b>`:''}${noiseSkipped?` &middot; ${noiseSkipped} files skipped unread`:''}.
       Each pin is the center of the KMZ site plan &mdash; rename before creating if needed.</div>
       <div class="toolbar" style="margin:10px 0 0">
         <input type="search" id="kzFilter" class="grow" placeholder="Filter by name or folder&hellip;">
@@ -1663,6 +1684,25 @@ function openKmzReview(locs, errs, fileCount, noiseSkipped, refNote){
     if(nt) nt.onclick=()=>{ noiseOpen=!noiseOpen; const w=document.getElementById('kzNoiseWrap'); if(w) w.classList.toggle('hide',!noiseOpen); nt.innerHTML=(noiseOpen?'&#9660;':'&#9654;')+` noise (${kmzRows.filter(r=>r.noise).length})`; };
     root.querySelector('[data-noise-edit2]').onclick=()=>openNoiseEditor(()=>{
       kmzRows.forEach(r=>{ if(r.status==='new'){ r.noise=isNoiseName(r.name); if(r.noise) r.apply=false; } });
+      renderKz();
+    });
+    root.querySelector('#kzBody').addEventListener('click',e=>{
+      const ab=e.target.closest('[data-kzalias]'); if(!ab) return;
+      const r=kmzRows.find(x=>x.i===+ab.dataset.kzalias); if(!r||!r.aliasSuggest) return;
+      const s=SUBS.find(x=>x.name===r.aliasSuggest.name); if(!s){ showToast('Sub not found'); return; }
+      if(!Array.isArray(s.aliases)) s.aliases=[];
+      for(const a of [r.newName, r.name])
+        if(a && norm(a)!==norm(s.name) && !s.aliases.some(x=>norm(x)===norm(a))) s.aliases.push(a);
+      persistSubs(); renderSubs();
+      if(r._rep) r._rep.resolution='alias saved → '+s.name;
+      kmzRows=kmzRows.filter(x=>x!==r);
+      aliasedN++;
+      showToast(`Alias saved → ${s.name}`);
+      if(!kmzRows.length){
+        root.innerHTML='';
+        setKmzStatus(`<b>Review done:</b> ${aliasedN} name(s) confirmed as aliases of existing subs — nothing left to add.${KMZ_REPORT_BTN}`);
+        return;
+      }
       renderKz();
     });
     root.querySelector('#kzBody').addEventListener('change',e=>{
@@ -1854,7 +1894,7 @@ document.getElementById('crewBody').addEventListener('click',e=>{
 });
 
 // init
-const APP_VERSION='v27 · 2026-08-19';
+const APP_VERSION='v28 · 2026-08-19';
 document.getElementById('appVer').textContent=APP_VERSION;
 renderSubs(); renderCrews();
 </script>
