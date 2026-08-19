@@ -33,7 +33,7 @@ out, n_ver = re.subn(r"const APP_VERSION='([^']*)';",
 # 4. orange accent so the pages look unmistakably different
 out = out.replace('#2563eb', '#ea580c').replace('#1d4ed8', '#c2410c').replace('#eef6ff', '#ffedd5')
 
-assert n_keys == 8, f'expected 8 storage keys, saw {n_keys}'
+assert n_keys == 9, f'expected 9 storage keys, saw {n_keys}'
 assert n_seed == 1, 'SUBS_SEED not found'
 assert n_ver == 1, 'APP_VERSION not found'
 open('company.html', 'w', encoding='utf-8').write(out)

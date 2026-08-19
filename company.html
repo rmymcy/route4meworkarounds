@@ -257,6 +257,7 @@
       <div class="toolbar">
         <input type="search" class="grow" id="subSearch" placeholder="Filter&hellip;">
         <button class="small" id="subsMapBtn">&#128205; Map</button>
+        <button class="small" id="subsSortBtn" title="toggle list order: alphabetical or grouped by geography">Sort: A&ndash;Z</button>
         <button class="primary small" id="addSubBtn">+ Add</button>
         <button class="small" id="kmzBtn">KMZ&hellip;</button>
         <input type="file" id="kmzFile" accept=".kmz,.kml" multiple class="hide">
@@ -954,12 +955,31 @@ function mountSubPicker(host,onPick){
 
 /* ============================ SUBS LIBRARY (inline grid, dispatch-style) ============================ */
 function subHasGeo(s){ return s.lat!=null&&s.lat!==''&&s.lng!=null&&s.lng!==''; }
+const K_SUBSORT='r4mall_subsort_v1';
+let SUBS_SORT=load(K_SUBSORT,'az'); // 'az' | 'geo'
+/* Morton (z-order) key: interleaves lat/lng bits so map-neighbors sort adjacent */
+function mortonKey(lat,lng){
+  const a=Math.max(0,Math.min(65535,Math.round((+lat+90)/180*65535)));
+  const b=Math.max(0,Math.min(65535,Math.round((+lng+180)/360*65535)));
+  let m=0;
+  for(let i=15;i>=0;i--) m=m*4+((a>>i&1)*2+(b>>i&1));
+  return m;
+}
 function subsFilterList(){
   const q=norm(document.getElementById('subSearch').value);
   const list=SUBS.map((s,i)=>({s,i}))
     .filter(({s})=>!q || norm(s.name).includes(q) || norm(s.nickname||'').includes(q)
-      || norm(s.address||'').includes(q) || (s.aliases||[]).some(a=>norm(a).includes(q)))
-    .sort((a,b)=>a.s.name.localeCompare(b.s.name));
+      || norm(s.address||'').includes(q) || (s.aliases||[]).some(a=>norm(a).includes(q)));
+  if(SUBS_SORT==='geo'){
+    list.sort((a,b)=>{
+      const ga=subHasGeo(a.s), gb=subHasGeo(b.s);
+      if(ga!==gb) return ga?-1:1;                    // no-coordinate subs sink to the bottom
+      if(ga&&gb){ const d=mortonKey(a.s.lat,a.s.lng)-mortonKey(b.s.lat,b.s.lng); if(d) return d; }
+      return a.s.name.localeCompare(b.s.name);
+    });
+  } else {
+    list.sort((a,b)=>a.s.name.localeCompare(b.s.name));
+  }
   return {list, filtered:!!q};
 }
 const SUBS_RENDER_CAP=400; // huge libraries: render the first N, filter to narrow
@@ -2042,6 +2062,13 @@ document.getElementById('importSubsBtn').onclick=()=>document.getElementById('im
 document.getElementById('importSubs').onchange=e=>{ const f=e.target.files[0]; if(!f)return; const rd=new FileReader(); rd.onload=()=>{ try{const d=JSON.parse(rd.result); if(!Array.isArray(d))throw 0; SUBS=d.map(x=>({name:x.name||'',nickname:x.nickname||'',address:x.address||'',lat:x.lat==null?null:x.lat,lng:x.lng==null?null:x.lng,aliases:x.aliases||[]})); persistSubs(); renderSubs(); showToast('Imported '+SUBS.length+' subdivisions'); }catch(err){ showToast('Invalid JSON'); } }; rd.readAsText(f); e.target.value=''; };
 document.getElementById('resetSubs').onclick=()=>{ if(confirm('Reset the subdivision library to the original seed? Your changes will be lost.')){ SUBS=JSON.parse(JSON.stringify(SUBS_SEED)); persistSubs(); renderSubs(); showToast('Reset'); } };
 document.getElementById('subsMapBtn').onclick=()=>toggleSubsMap();
+document.getElementById('subsSortBtn').onclick=()=>{
+  SUBS_SORT=SUBS_SORT==='az'?'geo':'az';
+  save(K_SUBSORT,SUBS_SORT);
+  document.getElementById('subsSortBtn').innerHTML='Sort: '+(SUBS_SORT==='geo'?'Region':'A&ndash;Z');
+  renderSubs();
+};
+document.getElementById('subsSortBtn').innerHTML='Sort: '+(SUBS_SORT==='geo'?'Region':'A&ndash;Z');
 const subsListEl=document.getElementById('subsList');
 subsListEl.addEventListener('change',e=>{
   const t=e.target;
@@ -2100,7 +2127,7 @@ document.getElementById('crewBody').addEventListener('click',e=>{
 });
 
 // init
-const APP_VERSION='v32 · 2026-08-19 · COMPANY';
+const APP_VERSION='v33 · 2026-08-19 · COMPANY';
 document.getElementById('appVer').textContent=APP_VERSION;
 renderSubs(); renderCrews();
 </script>
