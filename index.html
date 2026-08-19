@@ -73,6 +73,14 @@
   .stat b{display:block;font-size:22px;color:var(--ink);font-weight:700;line-height:1.1}
   .toolbar{display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap}
   .toolbar .grow{flex:1;min-width:180px}
+  .menu-wrap{position:relative}
+  .menu{position:absolute;right:0;top:calc(100% + 4px);background:var(--panel);border:1px solid var(--line);border-radius:10px;
+    box-shadow:0 8px 24px rgba(16,24,40,.14);display:none;flex-direction:column;min-width:160px;z-index:45;overflow:hidden;padding:4px}
+  .menu.open{display:flex}
+  .menu button{border:none;background:none;text-align:left;padding:8px 12px;font-weight:500;border-radius:6px}
+  .menu button:hover{background:#f8fafc}
+  .menu button.mdanger{color:var(--err)}
+  .menu button.mdanger:hover{background:var(--err-bg)}
   .muted{color:var(--muted)}
   .hide{display:none}
   /* modal */
@@ -154,7 +162,7 @@
 <header>
   <div>
     <h1>Route4Me Workaround</h1>
-    <div class="sub">Sage &harr; Route4Me &middot; local &amp; offline &middot; <b id="appVer"></b></div>
+    <div class="sub"><span id="appVer"></span></div>
   </div>
   <nav class="tabs">
     <div class="tab active" data-tab="convert">Send to Route4Me</div>
@@ -168,11 +176,9 @@
   <!-- ================= CONVERT ================= -->
   <section id="tab-convert">
     <div class="card">
-      <h2>1. Drop your ERP export</h2>
-      <p class="help">Upload the CSV straight from your ERP. The tool inserts <b>Latitude</b> / <b>Longitude</b> (from your library),
-        appends a <b>Depot</b> column, and adds your crew-home depot rows &mdash; ready to upload to Route4Me. Every original field is preserved exactly.</p>
+      <h2>1. Sage export (file01)</h2>
       <div id="drop" class="drop">
-        <p style="margin:0 0 8px"><b>Drag &amp; drop</b> the ERP CSV here, or</p>
+        <p style="margin:0 0 8px"><b>Drag &amp; drop</b> the Sage CSV here, or</p>
         <button class="primary" id="pickBtn">Choose file&hellip;</button>
         <input type="file" id="file" accept=".csv,text/csv" class="hide">
         <p id="fileName" class="muted" style="margin:12px 0 0"></p>
@@ -180,9 +186,7 @@
     </div>
 
     <div class="card hide" id="trimCard">
-      <h2>2. Review &amp; trim jobs</h2>
-      <p class="help">Sort by any column (click a header). Select rows to drop &mdash; click, <b>Shift+click</b> for a range,
-        <b>Ctrl/Cmd+click</b> to toggle &mdash; then <b>Remove selected</b>. Handy for pulling jobs by date before routing.</p>
+      <h2>2. Review &amp; trim</h2>
       <div id="trimWarn" class="hide" style="margin-bottom:14px"></div>
       <div class="toolbar">
         <button class="small danger" id="removeSelBtn">Remove selected (0)</button>
@@ -191,7 +195,7 @@
         <button class="primary" id="genBtn">Build Route4Me file &rarr;</button>
       </div>
       <div class="tablewrap" style="max-height:52vh">
-        <table id="jobsTable">
+        <table id="jobsTable" title="Click a header to sort · Shift+click selects a range · Ctrl/Cmd+click toggles">
           <thead><tr id="jobsHead"></tr></thead>
           <tbody id="jobsBody"></tbody>
         </table>
@@ -213,12 +217,8 @@
   <!-- ================= BRING BACK (file03 -> file04) ================= -->
   <section id="tab-bring" class="hide">
     <div class="card">
-      <h2>1. Drop the Route4Me export (file03)</h2>
-      <p class="help">The routed export with crew names (<b>User_First_Name</b> / <b>User_Last_Name</b>). The tool matches each job back to your
-        original Sage export by <b>Svc&nbsp;Job&nbsp;Num</b>, drops blank &amp; unassigned rows, sets <b>Servicer&nbsp;Id</b> to the crew&rsquo;s code, and
-        remaps <b>Status</b> &mdash; producing a file in Sage&rsquo;s exact format.</p>
-
-      <label class="fld">Original Sage export (file01)</label>
+      <h2>1. Route4Me export (file03)</h2>
+      <label class="fld">Paired Sage export (file01)</label>
       <div id="f1box" class="note" style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:14px">
         <span id="f1status">No file01 loaded yet.</span>
         <span><button class="small" id="f1pickBtn">Use a different file01&hellip;</button>
@@ -247,21 +247,24 @@
   <!-- ================= SUBDIVISIONS ================= -->
   <section id="tab-subs" class="hide">
     <div class="card">
-      <h2>Subdivision library</h2>
-      <p class="help">The lat/long source. Matching: exact name &rarr; alias &rarr; truncation &rarr; fuzzy suggestions on import. Edit everything inline; aliases hold the shortened / misspelled Sage forms.</p>
+      <h2>Subdivisions</h2>
       <div class="toolbar">
-        <input type="search" class="grow" id="subSearch" placeholder="Filter name, nickname, address or alias&hellip;">
+        <input type="search" class="grow" id="subSearch" placeholder="Filter&hellip;">
         <button class="small" id="subsMapBtn">&#128205; Map</button>
-        <button class="primary small" id="addSubBtn">+ Add subdivision</button>
-        <button class="small" id="kmzBtn">Update from KMZ&hellip;</button>
+        <button class="primary small" id="addSubBtn">+ Add</button>
+        <button class="small" id="kmzBtn">KMZ&hellip;</button>
         <input type="file" id="kmzFile" accept=".kmz,.kml" multiple class="hide">
         <button class="small" id="kmzDirBtn">Scan folder&hellip;</button>
-        <button class="small hide" id="kmzRescanBtn" title="re-scan the same folder as last time (uses the cache, so it's fast)">Rescan last</button>
         <input type="file" id="kmzDir" webkitdirectory directory multiple class="hide">
-        <button class="small" id="exportSubs">Export JSON</button>
-        <button class="small" id="importSubsBtn">Import JSON</button>
+        <div class="menu-wrap">
+          <button class="small" id="subsMenuBtn" title="more">&#8943;</button>
+          <div class="menu" id="subsMenu">
+            <button id="exportSubs">Export JSON</button>
+            <button id="importSubsBtn">Import JSON</button>
+            <button class="mdanger" id="resetSubs">Reset to seed</button>
+          </div>
+        </div>
         <input type="file" id="importSubs" accept=".json" class="hide">
-        <button class="small danger" id="resetSubs">Reset to seed</button>
       </div>
       <div id="kmzStatus" class="note hide" style="margin-bottom:12px"></div>
       <div id="subsListWrap">
@@ -276,15 +279,19 @@
   <!-- ================= CREWS ================= -->
   <section id="tab-crews" class="hide">
     <div class="card">
-      <h2>Crew / depot library</h2>
-      <p class="help">Each crew starts and ends at home. These become the <b>Depot</b> rows (Depot = 1) appended to every Route4Me upload.</p>
+      <h2>Crews</h2>
       <div class="toolbar">
-        <input type="search" class="grow" id="crewSearch" placeholder="Search crew&hellip;">
-        <button class="primary small" id="addCrewBtn">+ Add crew</button>
-        <button class="small" id="exportCrews">Export JSON</button>
-        <button class="small" id="importCrewsBtn">Import JSON</button>
+        <input type="search" class="grow" id="crewSearch" placeholder="Filter&hellip;">
+        <button class="primary small" id="addCrewBtn">+ Add</button>
+        <div class="menu-wrap">
+          <button class="small" id="crewsMenuBtn" title="more">&#8943;</button>
+          <div class="menu" id="crewsMenu">
+            <button id="exportCrews">Export JSON</button>
+            <button id="importCrewsBtn">Import JSON</button>
+            <button class="mdanger" id="resetCrews">Reset to seed</button>
+          </div>
+        </div>
         <input type="file" id="importCrews" accept=".json" class="hide">
-        <button class="small danger" id="resetCrews">Reset to seed</button>
       </div>
       <div class="tablewrap">
         <table>
@@ -296,8 +303,6 @@
     </div>
   </section>
 </main>
-
-<footer>Runs entirely in your browser — your files are never uploaded. Libraries are saved locally on this computer. Only the map view fetches tiles (OpenStreetMap) and needs internet. <span id="appVerFoot"></span></footer>
 
 <div id="modalRoot"></div>
 <div id="modalRoot2"></div>
@@ -1236,14 +1241,6 @@ function cleanNewName(s){
   return v||String(s||'').trim();
 }
 function rnd(v){ return Math.round(Number(v)*1e6)/1e6; }
-/* ---- remember the last scanned folder handle (IndexedDB) for one-click rescan ---- */
-function idbOpen(){ return new Promise((res,rej)=>{ const r=indexedDB.open('r4m_tool',1);
-  r.onupgradeneeded=()=>r.result.createObjectStore('kv'); r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error); }); }
-async function idbSet(key,val){ try{ const db=await idbOpen(); await new Promise((res,rej)=>{ const tx=db.transaction('kv','readwrite');
-  tx.objectStore('kv').put(val,key); tx.oncomplete=res; tx.onerror=()=>rej(tx.error); }); db.close(); }catch(e){} }
-async function idbGet(key){ try{ const db=await idbOpen(); const v=await new Promise((res,rej)=>{ const tx=db.transaction('kv','readonly');
-  const rq=tx.objectStore('kv').get(key); rq.onsuccess=()=>res(rq.result); rq.onerror=()=>rej(rq.error); }); db.close(); return v; }catch(e){ return null; } }
-
 /* ---- crawl/read cancellation ---- */
 let KMZ_CANCEL=false;
 function cancelKmzScan(){ KMZ_CANCEL=true; }
@@ -1342,7 +1339,6 @@ async function scanFolderModern(dirHandle){
       setKmzStatus('Could not open the folder picker ('+esc(e.message||e.name)+') — falling back to the classic picker.');
       document.getElementById('kmzDir').click(); return;
     }
-    idbSet('lastDir',dirHandle).then(()=>document.getElementById('kmzRescanBtn').classList.remove('hide'));
   }
   KMZ_CANCEL=false;
   const items=[]; let dirs=0, seen=0, denied=0, lastPaint=0, ignoredDirs=0;
@@ -1747,11 +1743,11 @@ document.getElementById('kmzBtn').onclick=()=>document.getElementById('kmzFile')
 document.getElementById('kmzFile').onchange=e=>{ const fs=[...e.target.files]; if(fs.length) processKmzFiles(fs); e.target.value=''; };
 document.getElementById('kmzDirBtn').onclick=()=>{
   if(window.showDirectoryPicker){
-    setKmzStatus(`Pick the folder&hellip; Chrome may ask to let this page <b>view files</b> in it &mdash; allow it (read-only, nothing leaves this computer). Progress will appear here as the crawl runs.`);
+    setKmzStatus(`Pick a folder &mdash; allow &ldquo;view files&rdquo; if asked. Progress shows here.`);
     scanFolderModern();
     return;
   }
-  setKmzStatus(`Waiting for folder selection&hellip; Large network folders can take a minute to list. If the browser asks to <b>&ldquo;Upload N files&rdquo;</b>, click Upload &mdash; nothing leaves this computer; that&rsquo;s just how the browser hands a local page the file list. (If you cancelled the picker, click Scan folder again.)`);
+  setKmzStatus(`Waiting for folder selection&hellip; if the browser asks to &ldquo;Upload N files&rdquo;, click Upload.`);
   document.getElementById('kmzDir').click();
 };
 document.getElementById('kmzDir').onchange=e=>{
@@ -1760,19 +1756,13 @@ document.getElementById('kmzDir').onchange=e=>{
   if(!kmz.length){ setKmzStatus(`<b>Scan finished:</b> the folder handed over ${all.length} file(s), but <b>none were .kmz / .kml</b>. Check you picked the right folder level.`); return; }
   processKmzFiles(kmz);
 };
-// one-click rescan of the last-picked folder (modern picker only)
-if(window.showDirectoryPicker) idbGet('lastDir').then(h=>{ if(h) document.getElementById('kmzRescanBtn').classList.remove('hide'); });
-document.getElementById('kmzRescanBtn').onclick=async()=>{
-  const h=await idbGet('lastDir');
-  if(!h){ setKmzStatus('No remembered folder yet — use Scan folder first.'); return; }
-  try{
-    let perm=await h.queryPermission({mode:'read'});
-    if(perm!=='granted') perm=await h.requestPermission({mode:'read'});
-    if(perm!=='granted'){ setKmzStatus('Chrome denied access to the remembered folder — use Scan folder to pick it again.'); return; }
-  }catch(e){ setKmzStatus('Could not reopen the remembered folder — use Scan folder to pick it again.'); return; }
-  setKmzStatus(`Rescanning <b>${esc(h.name||'last folder')}</b>&hellip; unchanged KMZs come from cache, so this should be quick.`);
-  scanFolderModern(h);
-};
+// overflow menus (⋯) — Export/Import/Reset live here now
+for(const [btn,menu] of [['subsMenuBtn','subsMenu'],['crewsMenuBtn','crewsMenu']]){
+  document.getElementById(btn).onclick=e=>{ e.stopPropagation(); const m=document.getElementById(menu);
+    document.querySelectorAll('.menu.open').forEach(x=>{ if(x!==m) x.classList.remove('open'); });
+    m.classList.toggle('open'); };
+}
+document.addEventListener('click',e=>{ if(!e.target.closest('.menu-wrap')) document.querySelectorAll('.menu.open').forEach(m=>m.classList.remove('open')); });
 document.getElementById('exportSubs').onclick=()=>download('subdivisions.json',JSON.stringify(SUBS,null,2));
 document.getElementById('importSubsBtn').onclick=()=>document.getElementById('importSubs').click();
 document.getElementById('importSubs').onchange=e=>{ const f=e.target.files[0]; if(!f)return; const rd=new FileReader(); rd.onload=()=>{ try{const d=JSON.parse(rd.result); if(!Array.isArray(d))throw 0; SUBS=d.map(x=>({name:x.name||'',nickname:x.nickname||'',address:x.address||'',lat:x.lat==null?null:x.lat,lng:x.lng==null?null:x.lng,aliases:x.aliases||[]})); persistSubs(); renderSubs(); showToast('Imported '+SUBS.length+' subdivisions'); }catch(err){ showToast('Invalid JSON'); } }; rd.readAsText(f); e.target.value=''; };
@@ -1836,9 +1826,8 @@ document.getElementById('crewBody').addEventListener('click',e=>{
 });
 
 // init
-const APP_VERSION='v23 · 2026-08-19';
+const APP_VERSION='v24 · 2026-08-19';
 document.getElementById('appVer').textContent=APP_VERSION;
-document.getElementById('appVerFoot').textContent=APP_VERSION;
 renderSubs(); renderCrews();
 </script>
 </body>
