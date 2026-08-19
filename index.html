@@ -1248,9 +1248,21 @@ const K_KMZNOISE='r4m_kmznoise_v1';
 const KMZNOISE_DEFAULT=['asbuilt','as built','benchmark','topo','bndy','boundary','control','flood','fema','easement','esmt','utility','utilities','drainage','lot','block','exhibit','detail','sketch'];
 let KMZNOISE=load(K_KMZNOISE,KMZNOISE_DEFAULT);
 function persistKmzNoise(){ save(K_KMZNOISE,KMZNOISE); }
+const K_KMZNOISEPAT='r4m_kmznoisepat_v1';
+let KMZNOISE_PATTERNS=load(K_KMZNOISEPAT,true);
 function isNoiseName(name){
-  const n=' '+norm(String(name==null?'':name).replace(/\.(kmz|kml)$/i,'').replace(/[_\-.]/g,' '))+' ';
-  return KMZNOISE.some(w=>{ const t=norm(String(w).replace(/[_\-.]/g,' ')); return t && n.includes(' '+t+' '); });
+  const cleaned=norm(String(name==null?'':name).replace(/\.(kmz|kml)$/i,'').replace(/[_\-.]/g,' ')).trim();
+  const n=' '+cleaned+' ';
+  if(KMZNOISE.some(w=>{ const t=norm(String(w).replace(/[_\-.]/g,' ')); return t && n.includes(' '+t+' '); })) return true;
+  if(KMZNOISE_PATTERNS){
+    // road designators: I95, I-4, SR 417, US 27, CR 535, HWY 50, FL 46, Tpke ramps
+    if(/(^| )(?:i|sr|us|cr|hwy|fl|tpke?) ?\d{1,4}( |$)/.test(cleaned)) return true;
+    // code-like: one single token that contains digits ("xk29a", "2523077") — real
+    // sub names are multi-word or digit-free, so lone digit-bearing tokens are refs/junk
+    const toks=cleaned.split(' ').filter(Boolean);
+    if(toks.length===1 && /\d/.test(toks[0]) && toks[0].length<=14) return true;
+  }
+  return false;
 }
 function openNoiseEditor(onSave){
   const root2=document.getElementById('modalRoot2');
@@ -1259,15 +1271,20 @@ function openNoiseEditor(onSave){
       <div class="muted" style="font-size:12.5px;margin-top:4px">A file or map name containing any of these words (whole-word match) is treated as <b>noise</b>: matching <i>filenames</i> are skipped without being read, matching <i>map names</i> land in the collapsed noise list instead of the main suggestions. One word or phrase per line.</div></div>
     <div class="mb">
       <textarea id="nz_text" style="width:100%;min-height:220px;font:inherit;padding:8px 10px;border:1px solid var(--line);border-radius:8px">${esc(KMZNOISE.join('\n'))}</textarea>
+      <label style="display:flex;gap:8px;align-items:flex-start;margin-top:10px;font-size:12.5px;cursor:pointer">
+        <input type="checkbox" id="nz_pat" ${KMZNOISE_PATTERNS?'checked':''} style="margin-top:2px">
+        <span>Also flag <b>road references</b> (I-95, SR 417, US 27, CR 535, HWY&hellip;) and <b>code-like names</b> &mdash; a single word containing digits, like &ldquo;xk29a&rdquo; or &ldquo;2523077&rdquo;</span></label>
       <button class="small" id="nz_reset" style="margin-top:8px">Restore defaults</button>
     </div>
     <div class="mf"><button id="nz_cancel">Cancel</button><button class="primary" id="nz_save">Save</button></div>
   </div></div>`;
-  document.getElementById('nz_reset').onclick=()=>{ document.getElementById('nz_text').value=KMZNOISE_DEFAULT.join('\n'); };
+  document.getElementById('nz_reset').onclick=()=>{ document.getElementById('nz_text').value=KMZNOISE_DEFAULT.join('\n'); document.getElementById('nz_pat').checked=true; };
   document.getElementById('nz_cancel').onclick=()=>root2.innerHTML='';
   document.getElementById('nz_save').onclick=()=>{
     KMZNOISE=document.getElementById('nz_text').value.split('\n').map(x=>x.trim()).filter(Boolean);
-    persistKmzNoise(); root2.innerHTML=''; showToast('Noise words saved');
+    KMZNOISE_PATTERNS=document.getElementById('nz_pat').checked;
+    persistKmzNoise(); save(K_KMZNOISEPAT,KMZNOISE_PATTERNS);
+    root2.innerHTML=''; showToast('Noise filter saved');
     if(onSave) onSave();
   };
 }
