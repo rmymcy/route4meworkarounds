@@ -154,7 +154,7 @@
 <header>
   <div>
     <h1>Route4Me Workaround</h1>
-    <div class="sub">Sage &harr; Route4Me &middot; local &amp; offline</div>
+    <div class="sub">Sage &harr; Route4Me &middot; local &amp; offline &middot; <b id="appVer"></b></div>
   </div>
   <nav class="tabs">
     <div class="tab active" data-tab="convert">Send to Route4Me</div>
@@ -297,7 +297,7 @@
   </section>
 </main>
 
-<footer>Runs entirely in your browser — your files are never uploaded. Libraries are saved locally on this computer. Only the map view fetches tiles (OpenStreetMap) and needs internet.</footer>
+<footer>Runs entirely in your browser — your files are never uploaded. Libraries are saved locally on this computer. Only the map view fetches tiles (OpenStreetMap) and needs internet. <span id="appVerFoot"></span></footer>
 
 <div id="modalRoot"></div>
 <div id="modalRoot2"></div>
@@ -1836,6 +1836,9 @@ document.getElementById('crewBody').addEventListener('click',e=>{
 });
 
 // init
+const APP_VERSION='v23 · 2026-08-19';
+document.getElementById('appVer').textContent=APP_VERSION;
+document.getElementById('appVerFoot').textContent=APP_VERSION;
 renderSubs(); renderCrews();
 </script>
 </body>
