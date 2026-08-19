@@ -1250,10 +1250,15 @@ let KMZNOISE=load(K_KMZNOISE,KMZNOISE_DEFAULT);
 function persistKmzNoise(){ save(K_KMZNOISE,KMZNOISE); }
 const K_KMZNOISEPAT='r4m_kmznoisepat_v1';
 let KMZNOISE_PATTERNS=load(K_KMZNOISEPAT,true);
+/* Files with more than this many point-pins are reference databases (benchmark
+   sets, monument lists), not subdivisions — their pins are dropped wholesale.
+   Overlays (site plans) are never affected. 0 disables. */
+const K_KMZMULTI='r4m_kmzmulti_v1';
+let KMZ_MULTI_CAP=load(K_KMZMULTI,5);
 function isNoiseName(name){
   const cleaned=norm(String(name==null?'':name).replace(/\.(kmz|kml)$/i,'').replace(/[_\-.]/g,' ')).trim();
   const n=' '+cleaned+' ';
-  if(KMZNOISE.some(w=>{ const t=norm(String(w).replace(/[_\-.]/g,' ')); return t && n.includes(' '+t+' '); })) return true;
+  if(KMZNOISE.some(w=>{ const t=norm(String(w).replace(/[_\-.]/g,' ')); return t && (n.includes(' '+t+' ')||n.includes(' '+t+'s ')); })) return true;
   if(KMZNOISE_PATTERNS){
     // road designators: I95, I-4, SR 417, US 27, CR 535, HWY 50, FL 46, Tpke ramps
     if(/(^| )(?:i|sr|us|cr|hwy|fl|tpke?) ?\d{1,4}( |$)/.test(cleaned)) return true;
@@ -1274,16 +1279,21 @@ function openNoiseEditor(onSave){
       <label style="display:flex;gap:8px;align-items:flex-start;margin-top:10px;font-size:12.5px;cursor:pointer">
         <input type="checkbox" id="nz_pat" ${KMZNOISE_PATTERNS?'checked':''} style="margin-top:2px">
         <span>Also flag <b>road references</b> (I-95, SR 417, US 27, CR 535, HWY&hellip;) and <b>code-like names</b> &mdash; a single word containing digits, like &ldquo;xk29a&rdquo; or &ldquo;2523077&rdquo;</span></label>
+      <label style="display:flex;gap:8px;align-items:center;margin-top:10px;font-size:12.5px">
+        <span>Skip files with more than</span>
+        <input type="number" id="nz_cap" value="${KMZ_MULTI_CAP}" min="0" style="width:70px">
+        <span>point pins <span class="muted">(reference databases like benchmark sets; 0 = off; site-plan overlays are never skipped)</span></span></label>
       <button class="small" id="nz_reset" style="margin-top:8px">Restore defaults</button>
     </div>
     <div class="mf"><button id="nz_cancel">Cancel</button><button class="primary" id="nz_save">Save</button></div>
   </div></div>`;
-  document.getElementById('nz_reset').onclick=()=>{ document.getElementById('nz_text').value=KMZNOISE_DEFAULT.join('\n'); document.getElementById('nz_pat').checked=true; };
+  document.getElementById('nz_reset').onclick=()=>{ document.getElementById('nz_text').value=KMZNOISE_DEFAULT.join('\n'); document.getElementById('nz_pat').checked=true; document.getElementById('nz_cap').value=5; };
   document.getElementById('nz_cancel').onclick=()=>root2.innerHTML='';
   document.getElementById('nz_save').onclick=()=>{
     KMZNOISE=document.getElementById('nz_text').value.split('\n').map(x=>x.trim()).filter(Boolean);
     KMZNOISE_PATTERNS=document.getElementById('nz_pat').checked;
-    persistKmzNoise(); save(K_KMZNOISEPAT,KMZNOISE_PATTERNS);
+    KMZ_MULTI_CAP=Math.max(0, parseInt(document.getElementById('nz_cap').value)||0);
+    persistKmzNoise(); save(K_KMZNOISEPAT,KMZNOISE_PATTERNS); save(K_KMZMULTI,KMZ_MULTI_CAP);
     root2.innerHTML=''; showToast('Noise filter saved');
     if(onSave) onSave();
   };
@@ -1434,9 +1444,27 @@ async function processKmzItems(items, partialCrawl){
     return;
   }
   const locs=[], errs=[];
-  let done=0, cachedHits=0, lastPaint=0;
+  let done=0, cachedHits=0, lastPaint=0, refSkipped=0, refPins=0;
   const paint=()=>{ const now=Date.now(); if(now-lastPaint>150){ lastPaint=now;
-    setKmzStatus(`Reading KMZ/KML&hellip; <b>${done} / ${work.length}</b>${cachedHits?` · <b>${cachedHits}</b> from cache (unchanged)`:''}${noiseNote}${KMZ_STOP_BTN}`); } };
+    setKmzStatus(`Reading KMZ/KML&hellip; <b>${done} / ${work.length}</b>${cachedHits?` · <b>${cachedHits}</b> from cache (unchanged)`:''}${noiseNote}${refSkipped?` · ${refSkipped} reference db(s) skipped`:''}${KMZ_STOP_BTN}`); } };
+  // A file with more than KMZ_MULTI_CAP point-pins is a reference database
+  // (benchmark/monument list) — drop its points; overlays are never dropped.
+  const emit=(arr,item,statusLabel,cachedMulti)=>{
+    let found=(arr||[]).filter(x=>x.name);
+    let multi=cachedMulti||0;
+    if(!multi && KMZ_MULTI_CAP>0){
+      const pts=found.filter(x=>x.kind==='point');
+      if(pts.length>KMZ_MULTI_CAP) multi=pts.length;
+    }
+    if(multi){
+      found=found.filter(x=>x.kind!=='point');
+      refSkipped++; refPins+=multi;
+      rep(item,statusLabel,{note:`reference database — ${multi} point pins skipped (cap ${KMZ_MULTI_CAP})`});
+    }
+    if(!found.length && !multi) rep(item,statusLabel,{note:'no location found'});
+    found.forEach(x=>{ const row=rep(item,statusLabel,{map:x.name,kind:x.kind,lat:rnd(x.lat),lng:rnd(x.lng)}); locs.push({...x,src:item.name,dir:dirOf(item),_rep:row}); });
+    return multi;
+  };
   const queue=work.slice();
   async function worker(){
     while(queue.length){
@@ -1449,15 +1477,16 @@ async function processKmzItems(items, partialCrawl){
         if(c && c.s===f.size && c.m===f.lastModified){        // unchanged since last scan
           cachedHits++;
           if(c.err){ errs.push(`${item.name}: ${c.err}`); rep(item,'cached',{note:c.err}); }
-          else if(!(c.locs||[]).length) rep(item,'cached',{note:'no location found'});
-          else c.locs.forEach(x=>{ if(x.name){ const row=rep(item,'cached',{map:x.name,kind:x.kind,lat:rnd(x.lat),lng:rnd(x.lng)}); locs.push({...x,src:item.name,dir:dirOf(item),_rep:row}); } });
+          else emit(c.locs, item, 'cached', c.multiPins||0);
         } else {
           try{
             const kml = /\.kml$/i.test(f.name) ? await f.text() : await readKmlFromKmzRanged(f);
-            const found=extractLocationsFromKml(kml).filter(x=>x.name);
-            KMZCACHE[key]={s:f.size,m:f.lastModified,locs:found};
-            if(!found.length){ KMZCACHE[key].err='no location found'; errs.push(`${item.name}: no location found`); rep(item,'read',{note:'no location found'}); }
-            found.forEach(x=>{ const row=rep(item,'read',{map:x.name,kind:x.kind,lat:rnd(x.lat),lng:rnd(x.lng)}); locs.push({...x,src:item.name,dir:dirOf(item),_rep:row}); });
+            const raw=extractLocationsFromKml(kml).filter(x=>x.name);
+            const multi=emit(raw, item, 'read');
+            const kept=multi ? raw.filter(x=>x.kind!=='point') : raw;
+            KMZCACHE[key]={s:f.size,m:f.lastModified,locs:kept};
+            if(multi) KMZCACHE[key].multiPins=multi;
+            if(!raw.length){ KMZCACHE[key].err='no location found'; errs.push(`${item.name}: no location found`); }
           }catch(e){
             KMZCACHE[key]={s:f.size,m:f.lastModified,err:e.message||'unreadable'};
             errs.push(`${item.name}: ${e.message}`);
@@ -1472,14 +1501,16 @@ async function processKmzItems(items, partialCrawl){
   persistKmzCache();
   const stopped=KMZ_CANCEL||partialCrawl;
   const label= stopped ? `${done} of ${work.length} (stopped early)` : work.length;
+  const refNote=refSkipped?` · <b>${refSkipped}</b> reference database(s) skipped (${refPins.toLocaleString()} pins)`:'';
   if(!locs.length){
-    setKmzStatus(`<b>Scan ${stopped?'stopped':'finished'}:</b> ${label} KMZ/KML file(s) checked${cachedHits?` (${cachedHits} from cache)`:''}${noiseNote}, but no usable locations found.${errs.length?` Problems: ${esc(errs.slice(0,3).join(' · '))}${errs.length>3?` (+${errs.length-3} more)`:''}`:''}${KMZ_REPORT_BTN}`);
+    setKmzStatus(`<b>Scan ${stopped?'stopped':'finished'}:</b> ${label} KMZ/KML file(s) checked${cachedHits?` (${cachedHits} from cache)`:''}${noiseNote}${refNote}, but no usable locations found.${errs.length?` Problems: ${esc(errs.slice(0,3).join(' · '))}${errs.length>3?` (+${errs.length-3} more)`:''}`:''}${KMZ_REPORT_BTN}`);
     return;
   }
-  openKmzReview(locs, errs, label, noiseSkipped);
+  openKmzReview(locs, errs, label, noiseSkipped, refNote);
 }
 let kmzRows=[];
-function openKmzReview(locs, errs, fileCount, noiseSkipped){
+function openKmzReview(locs, errs, fileCount, noiseSkipped, refNote){
+  refNote=refNote||'';
   const idx=buildIndex();
   const all=locs.map((L,i)=>{
     const m=matchSubForKmz(L.name, idx), sub=m.sub;
@@ -1508,7 +1539,7 @@ function openKmzReview(locs, errs, fileCount, noiseSkipped){
   const noiseFileNote = noiseSkipped?` · ${noiseSkipped} file(s) skipped by the noise filter`:'';
   if(!kmzRows.length){
     root.innerHTML='';
-    setKmzStatus(`<b>Scan finished:</b> ${fileCount!=null?fileCount+' file(s) read · ':''}<b>${skipped}</b> sub${skipped===1?'':'s'} matched the library and were skipped${noiseFileNote} &mdash; <b>nothing new to add</b>.${errs.length?` <span style="color:var(--warn)">(${errs.length} file(s) unreadable)</span>`:''}${KMZ_REPORT_BTN}`);
+    setKmzStatus(`<b>Scan finished:</b> ${fileCount!=null?fileCount+' file(s) read · ':''}<b>${skipped}</b> sub${skipped===1?'':'s'} matched the library and were skipped${noiseFileNote}${refNote} &mdash; <b>nothing new to add</b>.${errs.length?` <span style="color:var(--warn)">(${errs.length} file(s) unreadable)</span>`:''}${KMZ_REPORT_BTN}`);
     return;
   }
   const cardHtml=r=>{
@@ -1527,7 +1558,7 @@ function openKmzReview(locs, errs, fileCount, noiseSkipped){
   let noiseOpen=false;
   function renderKz(){
     const mainRows=kmzRows.filter(r=>!r.noise), noiseRows=kmzRows.filter(r=>r.noise);
-    setKmzStatus(`<b>Scan finished:</b> ${fileCount!=null?fileCount+' file(s) read · ':''}<b>${mainRows.length}</b> to review${noiseRows.length?` · ${noiseRows.length} more look like noise`:''} · <b>${skipped}</b> already in the library${noiseFileNote}${errs.length?` · <span style="color:var(--warn)">${errs.length} unreadable</span>`:''}${KMZ_REPORT_BTN}`);
+    setKmzStatus(`<b>Scan finished:</b> ${fileCount!=null?fileCount+' file(s) read · ':''}<b>${mainRows.length}</b> to review${noiseRows.length?` · ${noiseRows.length} more look like noise`:''} · <b>${skipped}</b> already in the library${noiseFileNote}${refNote}${errs.length?` · <span style="color:var(--warn)">${errs.length} unreadable</span>`:''}${KMZ_REPORT_BTN}`);
     root.innerHTML=`<div class="backdrop"><div class="modal" style="max-width:720px"><div class="mh"><h3>New subs found in KMZ scan</h3>
       <div class="muted" style="font-size:13px;margin-top:4px">${mainRows.length} suggestion(s) &middot; ${noiseRows.length} noise-filtered &middot; ${skipped} already in the library${noiseSkipped?` &middot; ${noiseSkipped} files skipped unread`:''}.
       Each pin is the center of the KMZ site plan &mdash; rename before creating if needed.</div>
