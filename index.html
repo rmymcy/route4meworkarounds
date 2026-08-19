@@ -555,7 +555,10 @@ function loadFile01ForReview(text,name){
     ['Description Of Problem','text'],['Status Code','text'],['Priority','text'],
     ['Subdiv Name','text'],['Address 1','text']];
   jobsCols=want.map(([n,t])=>({name:n,i:findCol(jobsHeader,n),type:t})).filter(c=>c.i>=0);
-  try{ save(K_LASTIMPORT,{name,text,when:0}); }catch(e){}   // stash full original for the reverse trip
+  // stash full original for the reverse trip — never silently: if storage is full,
+  // clear the KMZ cache and retry; if it still fails, say so.
+  if(!saveLastImport({name,text,when:0}))
+    showToast('Browser storage is full — this file01 works now but won’t be remembered after closing');
   setFile01(text,name,true);   // keep the Bring-back tab's file01 in sync with the latest Send
   // guard: warn if this looks like an already-processed file02 (has Depot/Lat/Long col or depot rows)
   const hasProcCol = ['Depot','Latitude','Longitude'].some(n=>findCol(jobsHeader,n)>=0);
@@ -631,17 +634,6 @@ function runConvertRows(header, dataRows){
   if(res.unmatched.size){ openUnmatchedModal(res.unmatched, ()=>runConvertRows(header,dataRows)); }
 }
 let lastGenHeader=null, lastGenRows=null;
-
-function runConvert(text, name){
-  let res;
-  try{ res=convert(text,name); }
-  catch(e){ showToast(e.message); return; }
-  // stash raw import for later export-patchwork
-  try{ save(K_LASTIMPORT,{name,text,when:Date.now()}); }catch(e){}
-  lastResult=res;
-  renderResult(res);
-  if(res.unmatched.size){ openUnmatchedModal(res.unmatched, ()=>{ runConvert(text,name); }); }
-}
 
 function renderResult(res){
   document.getElementById('resultCard').classList.remove('hide');
@@ -1333,6 +1325,27 @@ const KMZ_REPORT_BTN=` <button class="small" data-report style="margin-left:8px;
 const K_KMZCACHE='r4m_kmzcache_v1';
 let KMZCACHE=load(K_KMZCACHE,{});
 function persistKmzCache(){ try{ const n=Object.keys(KMZCACHE).length; if(n>20000) KMZCACHE={}; save(K_KMZCACHE,KMZCACHE); }catch(e){} }
+// migrate pre-v20 cache entries that stored thousands of reference-db pins —
+// they bloat localStorage and can block other saves (e.g. the file01 stash)
+(function pruneKmzCache(){
+  let changed=false;
+  for(const k in KMZCACHE){ const c=KMZCACHE[k];
+    if(c && Array.isArray(c.locs) && KMZ_MULTI_CAP>0){
+      const pts=c.locs.filter(x=>x&&x.kind==='point');
+      if(pts.length>KMZ_MULTI_CAP){ c.multiPins=pts.length; c.locs=c.locs.filter(x=>x.kind!=='point'); changed=true; }
+    }
+  }
+  if(changed) persistKmzCache();
+})();
+/* save the file01 stash; on a full store, drop the KMZ cache and retry once */
+function saveLastImport(v){
+  try{ save(K_LASTIMPORT,v); return true; }
+  catch(e){
+    try{ KMZCACHE={}; save(K_KMZCACHE,KMZCACHE); save(K_LASTIMPORT,v);
+      showToast('Storage was full — cleared the KMZ scan cache to make room'); return true; }
+    catch(e2){ return false; }
+  }
+}
 
 /* Modern folder scan (Chrome/Edge): we crawl the tree ourselves — in parallel —
    with live progress, and only ever open .kmz/.kml. */
@@ -1831,7 +1844,7 @@ document.getElementById('crewBody').addEventListener('click',e=>{
 });
 
 // init
-const APP_VERSION='v25 · 2026-08-19';
+const APP_VERSION='v26 · 2026-08-19';
 document.getElementById('appVer').textContent=APP_VERSION;
 renderSubs(); renderCrews();
 </script>
