@@ -1384,6 +1384,10 @@ async function processCrewsFile(f){
       if(!isFinite(lat)||!isFinite(lng)){ skipped++; continue; }
       let c=CREWS.find(x=>norm(x.name)===norm(first) && norm(x.last||'')===norm(last));
       if(!c && code) c=CREWS.find(x=>norm(x.code||'')===norm(code));
+      // same first name with no last name on file (prefilled-template rows) -> same person, fill it in
+      if(!c) c=CREWS.find(x=>norm(x.name)===norm(first) && !String(x.last||'').trim());
+      // same first name living at the same spot (<=0.5 mi) -> same person
+      if(!c) c=CREWS.find(x=>norm(x.name)===norm(first) && isFinite(+x.lat) && haversineMi(+x.lat,+x.lng,lat,lng)<=0.5);
       if(c){
         c.name=first; c.last=last;
         if(email) c.email=email;
@@ -2134,7 +2138,7 @@ document.getElementById('crewBody').addEventListener('click',e=>{
 });
 
 // init
-const APP_VERSION='v34 · 2026-08-19 · COMPANY';
+const APP_VERSION='v35 · 2026-08-19 · COMPANY';
 document.getElementById('appVer').textContent=APP_VERSION;
 renderSubs(); renderCrews();
 </script>
