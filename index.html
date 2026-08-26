@@ -292,6 +292,7 @@
         <div class="subs-grid-head" id="subsGridHead"></div>
         <div id="subsList" style="max-height:56vh;overflow-y:auto"></div>
       </div>
+      <div id="terrDrawBar" class="hide" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px"></div>
       <div id="subsMapWrap" class="hide"></div>
       <p class="muted" id="subCount" style="margin:10px 2px 0"></p>
     </div>
@@ -380,6 +381,31 @@ const TERR_COLORS=['#2563eb','#d97706','#16a34a','#9333ea','#dc2626','#0891b2','
 function terrColor(t){ const k=TERR.indexOf(t); return k<0 ? '#6b7683' : TERR_COLORS[k%TERR_COLORS.length]; }
 function subTerr(s){ const t=s&&s.terr?String(s.terr):''; return TERR.includes(t)?t:''; }
 function crewTerr(c){ const t=c&&c.terr?String(c.terr):''; return TERR.includes(t)?t:''; }
+/* territory areas drawn on the map: {terrName:[ring,...]}, ring=[[lat,lng],...] */
+const K_TERRPOLY=RK+'terrpoly_v1';
+let TERRPOLY=load(K_TERRPOLY,{});
+function persistTerrPoly(){ save(K_TERRPOLY,TERRPOLY); }
+function pointInRing(lat,lng,ring){ // ray cast, x=lng y=lat
+  let inside=false;
+  for(let i=0,j=ring.length-1;i<ring.length;j=i++){
+    const xi=ring[i][1], yi=ring[i][0], xj=ring[j][1], yj=ring[j][0];
+    if(((yi>lat)!==(yj>lat)) && (lng < (xj-xi)*(lat-yi)/(yj-yi)+xi)) inside=!inside;
+  }
+  return inside;
+}
+function terrForPoint(lat,lng){ // which drawn area contains this point ('' if none)
+  if(lat==null||lng==null||lat===''||lng===''||!isFinite(+lat)||!isFinite(+lng)) return '';
+  for(const t of TERR) for(const ring of (TERRPOLY[t]||[]))
+    if(ring.length>=3 && pointInRing(+lat,+lng,ring)) return t;
+  return '';
+}
+function assignInsideRing(t,ring,overwrite){ // returns counts; overwrite=false only fills blanks
+  let ns=0,nc=0;
+  for(const s of SUBS) if(subHasGeo(s) && pointInRing(+s.lat,+s.lng,ring) && (overwrite||!subTerr(s)) && s.terr!==t){ s.terr=t; ns++; }
+  for(const c of CREWS) if(c.lat!=null&&c.lng!=null&&isFinite(+c.lat) && pointInRing(+c.lat,+c.lng,ring) && (overwrite||!crewTerr(c)) && c.terr!==t){ c.terr=t; nc++; }
+  if(ns) persistSubs(); if(nc) persistCrews();
+  return {ns,nc};
+}
 
 /* ============================ MATCHING ============================ */
 function norm(s){ return String(s==null?'':s).trim().toLowerCase().replace(/\s+/g,' '); }
@@ -985,7 +1011,7 @@ function openUnmatchedModal(unmatched, onResolvedRerun){
           persistSubs(); return;
         }
         const aliases = norm(name)!==norm(entry.raw)&&entry.raw ? [entry.raw] : [];
-        SUBS.push({name,nickname:'',address:'',lat,lng,aliases});
+        SUBS.push({name,nickname:'',address:'',lat,lng,terr:terrForPoint(lat,lng),aliases});
         persistSubs();
         markResolved(entry,name,'create');
       }
@@ -1124,6 +1150,7 @@ function openGeoEditor(i){
     const m=v.match(/^\s*(-?\d+(?:\.\d+)?)\s*[,;\s]\s*(-?\d+(?:\.\d+)?)\s*$/);
     if(!m){ showToast('Could not read that — paste like "28.1876, -81.5534"'); return; }
     s.lat=+m[1]; s.lng=+m[2];
+    if(!subTerr(s)) s.terr=terrForPoint(s.lat,s.lng); // fresh coords may land inside a drawn area
     persistSubs(); root.innerHTML=''; renderSubs(); showToast('Coordinates set');
   };
   document.getElementById('geo_save').onclick=commit;
@@ -1131,16 +1158,19 @@ function openGeoEditor(i){
 }
 
 /* ============================ SUBS MAP (Leaflet — all subs + per-sub focus) ============================ */
-let subsMapInstance=null, subsMapLayer=null, subsMapInfoEl=null, _subsMapLastFilter=null, pendingSubFocus=null, _focusPin=null;
+let subsMapInstance=null, subsMapLayer=null, terrPolyLayer=null, subsMapInfoEl=null, _subsMapLastFilter=null, pendingSubFocus=null, _focusPin=null;
+let DRAW=null; // {terr, pts:[[lat,lng],...], shape} while drawing a territory area
 function mapAvailable(){ return typeof L!=='undefined'; }
 function toggleSubsMap(force){
   const mapWrap=document.getElementById('subsMapWrap'), listWrap=document.getElementById('subsListWrap'), btn=document.getElementById('subsMapBtn');
   const show = force!==undefined ? force : mapWrap.classList.contains('hide');
   if(show && !mapAvailable()){ showToast('Map needs internet (Leaflet + OpenStreetMap tiles) — reconnect and reload'); return; }
+  if(!show && DRAW) cancelDraw();
   mapWrap.classList.toggle('hide',!show);
+  document.getElementById('terrDrawBar').classList.toggle('hide',!show||!TERR.length);
   listWrap.classList.toggle('hide',show);
   btn.classList.toggle('primary',show);
-  if(show) renderSubsMap(true);
+  if(show){ renderDrawBar(); renderSubsMap(true); }
 }
 function renderSubsMap(fit){
   const wrap=document.getElementById('subsMapWrap');
@@ -1148,7 +1178,10 @@ function renderSubsMap(fit){
   if(!subsMapInstance){
     subsMapInstance=L.map('subsMapWrap',{zoomControl:true,zoomDelta:0.5,zoomSnap:0.5,preferCanvas:true}).setView(REGION_CENTER,8);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'© OpenStreetMap',maxZoom:19}).addTo(subsMapInstance);
+    terrPolyLayer=L.layerGroup().addTo(subsMapInstance); // areas under the pins
     subsMapLayer=L.layerGroup().addTo(subsMapInstance);
+    subsMapInstance.on('click',e=>{ if(DRAW) addDrawPoint(e.latlng); });
+    subsMapInstance.on('dblclick',()=>{ if(DRAW) finishDraw(); });
     const info=L.control({position:'topright'});
     info.onAdd=()=>{ subsMapInfoEl=L.DomUtil.create('div');
       subsMapInfoEl.style.cssText='background:rgba(255,255,255,.93);border:1px solid #d1d1d6;border-radius:6px;padding:5px 9px;font-size:11px;color:#3f3f46;box-shadow:0 1px 4px rgba(0,0,0,.15);line-height:1.5';
@@ -1164,8 +1197,9 @@ function renderSubsMap(fit){
   const located=list.filter(({s})=>subHasGeo(s));
   const missing=list.length-located.length;
   const pts=[];
+  renderTerrPolys();
   for(const {s,i} of located){
-    const m=L.circleMarker([+s.lat,+s.lng],{radius:7,color:'#fff',weight:1.5,fillColor:TERR.length?terrColor(subTerr(s)):REGION_COLOR,fillOpacity:.92});
+    const m=L.circleMarker([+s.lat,+s.lng],{radius:7,color:'#fff',weight:1.5,fillColor:TERR.length?terrColor(subTerr(s)):REGION_COLOR,fillOpacity:.92,interactive:!DRAW});
     m.bindTooltip(esc(s.name),{direction:'top',offset:[0,-6]});
     m.bindPopup(`<div style="min-width:180px">
       <div style="font-weight:700;font-size:12.5px">${esc(s.name)}</div>
@@ -1204,6 +1238,117 @@ function focusSubOnMap(i){
   toggleSubsMap(true);
 }
 
+/* ---- territory areas: draw polygons on the map to group subs & crews ---- */
+function renderTerrPolys(){
+  if(!terrPolyLayer) return;
+  terrPolyLayer.clearLayers();
+  for(const t of TERR) (TERRPOLY[t]||[]).forEach((ring,k)=>{
+    if(ring.length<3) return;
+    const insideN=SUBS.filter(s=>subHasGeo(s)&&pointInRing(+s.lat,+s.lng,ring)).length;
+    const p=L.polygon(ring,{color:terrColor(t),weight:2,fillColor:terrColor(t),fillOpacity:.07,dashArray:'6 4',interactive:!DRAW});
+    p.bindPopup(`<div style="min-width:170px">
+      <div style="font-weight:700;color:${terrColor(t)}">${esc(t)} area</div>
+      <div style="font-size:11px;color:#6b6b73;margin:3px 0 8px">${insideN} sub${insideN===1?'':'s'} inside</div>
+      <button class="small" data-polyfill="${esc(t)}" data-k="${k}">Assign blanks inside</button>
+      <button class="small danger" data-polydel="${esc(t)}" data-k="${k}">Delete area</button>
+    </div>`);
+    terrPolyLayer.addLayer(p);
+  });
+}
+function renderDrawBar(){
+  const bar=document.getElementById('terrDrawBar');
+  if(!TERR.length){ bar.classList.add('hide'); return; }
+  const polyN=TERR.reduce((a,t)=>a+((TERRPOLY[t]||[]).length),0);
+  if(DRAW){
+    bar.innerHTML=`<b style="color:${terrColor(DRAW.terr)}">Drawing ${esc(DRAW.terr)} area</b>
+      <span class="muted" style="font-size:12px">click the map to add corners (${DRAW.pts.length}) &mdash; clicks near another area's corner <b>snap to it</b> (no gaps) &mdash; double-click, Enter, or Finish to close; Esc cancels</span>
+      <button class="small primary" id="drawFinish" ${DRAW.pts.length<3?'disabled':''}>&check; Finish</button>
+      <button class="small" id="drawCancel">&times; Cancel</button>`;
+    document.getElementById('drawFinish').onclick=finishDraw;
+    document.getElementById('drawCancel').onclick=cancelDraw;
+  }else{
+    bar.innerHTML=`<span class="muted" style="font-size:12px">Territory areas:</span>
+      <select id="drawTerrSel" class="terr-select" style="width:auto">${TERR.map(t=>`<option value="${esc(t)}">${esc(t)}</option>`).join('')}</select>
+      <button class="small" id="drawStart">&#9998; Draw area</button>
+      ${polyN?`<button class="small" id="polyFillAll" title="give every sub/crew with no territory the area it sits in">Assign blanks from areas (${polyN})</button>`:
+        `<span class="muted" style="font-size:12px">&mdash; draw a shape around a group of pins to assign them all at once</span>`}`;
+    document.getElementById('drawStart').onclick=()=>startDraw(document.getElementById('drawTerrSel').value);
+    const fa=document.getElementById('polyFillAll');
+    if(fa) fa.onclick=()=>{
+      let ns=0,nc=0;
+      for(const t of TERR) for(const ring of (TERRPOLY[t]||[])){ const r=assignInsideRing(t,ring,false); ns+=r.ns; nc+=r.nc; }
+      showToast(ns||nc?`Assigned ${ns} sub${ns===1?'':'s'} + ${nc} crew${nc===1?'':'s'} from areas`:'No blanks inside any area');
+      renderSubs(); renderCrews(); renderSubsMap(false);
+    };
+  }
+}
+function startDraw(t){
+  if(!subsMapInstance||!TERR.includes(t)) return;
+  DRAW={terr:t,pts:[],shape:null,dots:[]};
+  subsMapInstance.doubleClickZoom.disable();
+  renderDrawBar(); renderSubsMap(false); // pins & areas go non-interactive so clicks land on the map
+}
+function snapToPolyCorner(latlng){
+  // clicks near an existing area's corner lock onto that exact vertex, so
+  // neighboring territories share borders with no gaps
+  const p=subsMapInstance.latLngToContainerPoint(latlng);
+  let best=null, bestD=14; // px, zoom-independent
+  for(const t of TERR) for(const ring of (TERRPOLY[t]||[])) for(const v of ring){
+    const q=subsMapInstance.latLngToContainerPoint(L.latLng(v[0],v[1]));
+    const d=Math.hypot(p.x-q.x,p.y-q.y);
+    if(d<bestD){ bestD=d; best=v; }
+  }
+  return best ? {ll:L.latLng(best[0],best[1]), snapped:true} : {ll:latlng, snapped:false};
+}
+function addDrawPoint(latlng){
+  const s=snapToPolyCorner(latlng);
+  DRAW.pts.push([s.ll.lat,s.ll.lng]);
+  if(DRAW.shape) DRAW.shape.remove();
+  DRAW.shape=(DRAW.pts.length>2?L.polygon:L.polyline)(DRAW.pts,{color:terrColor(DRAW.terr),weight:2,fillOpacity:.12}).addTo(subsMapInstance);
+  DRAW.dots.push(L.circleMarker(s.ll,{radius:s.snapped?6:4,color:s.snapped?'#111827':terrColor(DRAW.terr),weight:2,fillColor:'#fff',fillOpacity:1,interactive:false}).addTo(subsMapInstance));
+  renderDrawBar();
+}
+function endDraw(){
+  if(DRAW){ if(DRAW.shape) DRAW.shape.remove(); (DRAW.dots||[]).forEach(d=>d.remove()); }
+  DRAW=null;
+  if(subsMapInstance) subsMapInstance.doubleClickZoom.enable();
+  renderDrawBar(); renderSubsMap(false);
+}
+function cancelDraw(){ endDraw(); }
+function finishDraw(){
+  if(!DRAW) return;
+  if(DRAW.pts.length<3){ showToast('Click at least 3 corners first'); return; }
+  const t=DRAW.terr, ring=DRAW.pts;
+  (TERRPOLY[t]=TERRPOLY[t]||[]).push(ring);
+  persistTerrPoly();
+  const r=assignInsideRing(t,ring,true); // drawing is deliberate — everything inside becomes t
+  endDraw();
+  renderSubs(); renderCrews();
+  showToast(`${t} area saved — ${r.ns} sub${r.ns===1?'':'s'} + ${r.nc} crew${r.nc===1?'':'s'} assigned`);
+}
+// popup buttons inside Leaflet live in the map pane — delegate at document level
+document.addEventListener('click',e=>{
+  const del=e.target.closest('[data-polydel]'), fill=e.target.closest('[data-polyfill]');
+  if(!del&&!fill) return;
+  const b=del||fill, t=b.dataset.polydel||b.dataset.polyfill, k=+b.dataset.k;
+  const rings=TERRPOLY[t]; if(!rings||!rings[k]) return;
+  if(del){
+    if(!confirm(`Delete this ${t} area? (subs keep their current territory)`)) return;
+    rings.splice(k,1); if(!rings.length) delete TERRPOLY[t];
+    persistTerrPoly();
+  }else{
+    const r=assignInsideRing(t,rings[k],false);
+    showToast(r.ns||r.nc?`Assigned ${r.ns} sub(s) + ${r.nc} crew(s) to ${t}`:'No blanks inside this area');
+  }
+  if(subsMapInstance) subsMapInstance.closePopup();
+  renderSubs(); renderCrews(); renderSubsMap(false); renderDrawBar();
+});
+document.addEventListener('keydown',e=>{
+  if(!DRAW) return;
+  if(e.key==='Escape'){ e.preventDefault(); cancelDraw(); }
+  else if(e.key==='Enter'){ e.preventDefault(); finishDraw(); }
+});
+
 /* ============================ TERRITORIES ============================ */
 function openTerrModal(){
   const root=document.getElementById('modalRoot');
@@ -1217,7 +1362,7 @@ function openTerrModal(){
         <button class="icon-btn danger" data-tdel="${k}" title="remove territory">&times;</button></div>`; }).join('');
     root.innerHTML=`<div class="backdrop"><div class="modal"><div class="mh"><h3>Territories — ${REGION}</h3>
       <div class="muted" style="font-size:12.5px;margin-top:4px">Each territory becomes its own Route4Me upload file.
-      Assign subs in the library grid (or auto-assign below); crews on the Crews tab.</div></div>
+      Assign subs by <b>drawing areas on the map</b> (&#128205; Map &rarr; Draw area), in the library grid, or auto-assign below.</div></div>
     <div class="mb">
       ${rows||'<div class="muted" style="padding:10px 0">No territories yet — the Send tab makes one combined file.</div>'}
       <div class="row" style="margin-top:12px">
@@ -1232,7 +1377,12 @@ function openTerrModal(){
       </div>
     </div>
     <div class="mf"><button id="terrClose">Done</button></div></div></div>`;
-    document.getElementById('terrClose').onclick=()=>{ root.innerHTML=''; renderSubs(); renderCrews(); };
+    document.getElementById('terrClose').onclick=()=>{
+      root.innerHTML=''; renderSubs(); renderCrews();
+      const mapOpen=!document.getElementById('subsMapWrap').classList.contains('hide');
+      document.getElementById('terrDrawBar').classList.toggle('hide',!mapOpen||!TERR.length);
+      if(mapOpen){ renderDrawBar(); renderSubsMap(false); }
+    };
     const add=()=>{
       const v=document.getElementById('terrNew').value.trim().toUpperCase();
       if(!v) return;
@@ -1248,6 +1398,7 @@ function openTerrModal(){
       TERR.splice(+b.dataset.tdel,1);
       SUBS.forEach(s=>{ if(s.terr===t) s.terr=''; });
       CREWS.forEach(c=>{ if(c.terr===t) c.terr=''; });
+      delete TERRPOLY[t]; persistTerrPoly();
       persistTerr(); persistSubs(); persistCrews(); render();
     });
     const auto=document.getElementById('terrAuto');
@@ -1322,7 +1473,8 @@ function editSubModal(i){
     if((lat==='')!==(lng==='')){ showToast('Enter both lat & long, or neither'); return; }
     if(lat!==''&&(!isFinite(+lat)||!isFinite(+lng))){ showToast('Valid lat & long required'); return; }
     const rec={name,nickname:document.getElementById('e_nick').value.trim(),address:document.getElementById('e_addr').value.trim(),
-      lat:lat===''?null:+lat,lng:lng===''?null:+lng,terr:isNew?'':(s.terr||''),
+      lat:lat===''?null:+lat,lng:lng===''?null:+lng,
+      terr:(isNew||!(s.terr||'')) ? terrForPoint(lat===''?null:+lat,lng===''?null:+lng) : s.terr,
       aliases:document.getElementById('e_aliases').value.split('\n').map(x=>x.trim()).filter(Boolean)};
     if(isNew) SUBS.push(rec); else SUBS[i]=rec;
     persistSubs(); root.innerHTML=''; renderSubs(); showToast('Saved');
@@ -1360,7 +1512,8 @@ function editCrewModal(i){
     const lng=document.getElementById('c_lng').value.trim();
     if(!name){ showToast('Crew name required'); return; }
     if(lat===''||lng===''||!isFinite(+lat)||!isFinite(+lng)){ showToast('Valid lat & long required'); return; }
-    const rec={terr:isNew?'':(CREWS[i].terr||''),name,last:document.getElementById('c_last').value.trim(),code:document.getElementById('c_code').value.trim(),
+    const rec={terr:(isNew||!(CREWS[i].terr||'')) ? terrForPoint(+lat,+lng) : CREWS[i].terr,
+      name,last:document.getElementById('c_last').value.trim(),code:document.getElementById('c_code').value.trim(),
       email:document.getElementById('c_email').value.trim(),
       lat:+lat,lng:+lng,active:isNew?true:isActive(CREWS[i])};
     if(isNew) CREWS.push(rec); else CREWS[i]=rec;
@@ -1555,7 +1708,7 @@ async function processCrewsFile(f){
         c.lat=lat; c.lng=lng;
         updated++;
       } else {
-        CREWS.push({name:first,last,email,code,lat,lng,active:true});
+        CREWS.push({name:first,last,email,code,lat,lng,active:true,terr:terrForPoint(lat,lng)});
         added++;
       }
     }
@@ -2115,11 +2268,11 @@ function applyKmz(){
     if(r.status==='new'){
       const nm=(r.newName||r.name||'').trim(); if(!nm) continue;
       const existing=SUBS.find(s=>norm(s.name)===norm(nm));
-      if(existing){ if(!subHasGeo(existing)){ existing.lat=rnd(r.lat); existing.lng=rnd(r.lng); filled++; } }
-      else { SUBS.push({name:nm, nickname:'', address:'(from KMZ)', lat:rnd(r.lat), lng:rnd(r.lng), aliases:[]}); added++; }
+      if(existing){ if(!subHasGeo(existing)){ existing.lat=rnd(r.lat); existing.lng=rnd(r.lng); if(!subTerr(existing)) existing.terr=terrForPoint(existing.lat,existing.lng); filled++; } }
+      else { SUBS.push({name:nm, nickname:'', address:'(from KMZ)', lat:rnd(r.lat), lng:rnd(r.lng), terr:terrForPoint(r.lat,r.lng), aliases:[]}); added++; }
     } else {
       const sub=SUBS.find(s=>s.name===r.subName); if(!sub) continue;
-      sub.lat=rnd(r.lat); sub.lng=rnd(r.lng); filled++;
+      sub.lat=rnd(r.lat); sub.lng=rnd(r.lng); if(!subTerr(sub)) sub.terr=terrForPoint(sub.lat,sub.lng); filled++;
     }
   }
   persistSubs(); document.getElementById('modalRoot').innerHTML=''; renderSubs();
@@ -2321,7 +2474,7 @@ document.getElementById('crewBody').addEventListener('click',e=>{
 });
 
 // init
-const APP_VERSION='v37 · 2026-08-26';
+const APP_VERSION='v38 · 2026-08-26';
 document.getElementById('appVer').textContent=APP_VERSION+' · '+REGION;
 // region switcher: each region is its own workspace; a click stores the choice
 // and reloads so the whole app boots into that region's storage
