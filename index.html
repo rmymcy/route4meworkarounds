@@ -24,6 +24,11 @@
   .tabs{display:flex;gap:4px;margin-left:auto}
   .tab{padding:7px 14px;border-radius:8px;cursor:pointer;color:var(--muted);font-weight:600;font-size:13px;border:1px solid transparent}
   .tab.active{background:var(--chip);color:var(--ink)}
+  /* region switcher — each region is a fully separate workspace (own storage) */
+  .regions{display:flex;gap:2px;padding:3px;background:var(--chip);border-radius:9px}
+  .region{padding:5px 12px;border-radius:7px;cursor:pointer;font-weight:700;font-size:12px;color:var(--muted);letter-spacing:.04em}
+  .region:hover{color:var(--ink)}
+  .region.active{background:var(--panel);box-shadow:var(--shadow)}
   main{max-width:1080px;margin:0 auto;padding:22px 20px 80px}
   .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow);padding:20px;margin-bottom:18px}
   .card h2{margin:0 0 4px;font-size:15px}
@@ -170,6 +175,7 @@
     <h1>Route4Me Workaround</h1>
     <div class="sub"><span id="appVer"></span></div>
   </div>
+  <nav class="regions" id="regionBar" title="Each region keeps its own subs, crews, imports and settings — nothing crosses"></nav>
   <nav class="tabs">
     <div class="tab active" data-tab="convert">Send to Route4Me</div>
     <div class="tab" data-tab="bring">Bring back to Sage</div>
@@ -325,11 +331,25 @@ const SUBS_SEED = [{"name":"Atla Key","address":"(pin drop only)","lat":26.79539
 const CREWS_SEED = [{"name":"Hunter","last":"Cope","code":"","lat":30.277278,"lng":-81.73279},{"name":"Steven","last":"Brooks","code":"","lat":28.51403924410546,"lng":-81.48095821},{"name":"Ayinde","last":"Blackman","code":"","lat":28.158096,"lng":-81.497195},{"name":"Johnathan","last":"Ortiz","code":"","lat":28.521713,"lng":-81.289175},{"name":"Paul","last":"Mabb","code":"","lat":28.753204,"lng":-81.28209},{"name":"Eric","last":"Brand","code":"","lat":28.476193,"lng":-81.269467},{"name":"Daniel","last":"","code":"","lat":28.460857,"lng":-82.495107},{"name":"Kameron","last":"","code":"","lat":28.183023,"lng":-82.403044},{"name":"Joseph","last":"","code":"","lat":27.07305,"lng":-82.174303},{"name":"Owen","last":"","code":"","lat":26.972213,"lng":-82.089491},{"name":"Gustavo","last":"","code":"","lat":26.617244,"lng":-81.928241}];
 
 /* ============================ STORAGE ============================ */
-const K_SUBS='r4m_subs_v1', K_CREWS='r4m_crews_v1', K_LASTIMPORT='r4m_lastimport_v1';
+/* Regions are fully isolated workspaces: every key below is prefixed per
+   region, so subs / crews / imports / caches never cross between region tabs.
+   FL keeps the original un-prefixed keys so pre-region data is untouched. */
+const K_REGION='r4m_region_v1'; // the ONLY shared key: which region is open
+const REGION_DEFS={ FL:{c:'#2563eb',d:'#1d4ed8',center:[28.5,-81.4]},
+                    HOU:{c:'#ea580c',d:'#c2410c',center:[29.76,-95.37]},
+                    DFW:{c:'#16a34a',d:'#15803d',center:[32.85,-97.0]},
+                    ASA:{c:'#9333ea',d:'#7e22ce',center:[29.9,-98.1]} };
+let REGION='FL';
+try{ const r=localStorage.getItem(K_REGION); if(REGION_DEFS[r]) REGION=r; }catch(e){}
+const REGION_COLOR=REGION_DEFS[REGION].c, REGION_CENTER=REGION_DEFS[REGION].center;
+const RK = REGION==='FL' ? 'r4m_' : 'r4m_'+REGION.toLowerCase()+'_';
+const REGION_SUBS_SEED = REGION==='FL' ? SUBS_SEED : [];
+const REGION_CREWS_SEED = REGION==='FL' ? CREWS_SEED : [];
+const K_SUBS=RK+'subs_v1', K_CREWS=RK+'crews_v1', K_LASTIMPORT=RK+'lastimport_v1';
 function load(key,seed){ try{const v=localStorage.getItem(key); if(v) return JSON.parse(v);}catch(e){} return JSON.parse(JSON.stringify(seed)); }
 function save(key,val){ localStorage.setItem(key,JSON.stringify(val)); }
-let SUBS = load(K_SUBS,SUBS_SEED);
-let CREWS = load(K_CREWS,CREWS_SEED);
+let SUBS = load(K_SUBS,REGION_SUBS_SEED);
+let CREWS = load(K_CREWS,REGION_CREWS_SEED);
 // migrate crews saved before last-name / servicer-code existed
 (function migrateCrews(){
   const knownLast={hunter:'Cope',steven:'Brooks',ayinde:'Blackman',johnathan:'Ortiz',paul:'Mabb',eric:'Brand'};
@@ -533,7 +553,7 @@ function buildFile02(rows){
     out.push(reshape(cells, fmtCoord(cw.lat), fmtCoord(cw.lng), '1'));
   }
 
-  const outName=`Route4Me Upload ${todayStamp()}.csv`;
+  const outName=`Route4Me Upload ${REGION} ${todayStamp()}.csv`;
   return {rows:out, outName, unmatched, noCoords, matched, jobs, depots:activeCrews.length};
 }
 function isActive(cw){ return cw.active!==false; } // default on unless explicitly false
@@ -771,7 +791,7 @@ function reverseConvert(f03Text, f01Text){
   const routedMissing=[...assign.keys()].filter(s=>!f01svc.has(s)).length;
   const q = s => '"'+String(s==null?'':s).replace(/"/g,'""')+'"';
   const text = outRows.map(r=>r.map(q).join(',')).join('\n')+'\n';
-  return {text, outName:`Sage Import ${todayStamp()}.csv`, st, missingCode, unknownCrew, routedTotal, routedMissing};
+  return {text, outName:`Sage Import ${REGION} ${todayStamp()}.csv`, st, missingCode, unknownCrew, routedTotal, routedMissing};
 }
 function toMMDDYY(s){
   s=String(s==null?'':s).trim();
@@ -962,7 +982,7 @@ function mountSubPicker(host,onPick){
 
 /* ============================ SUBS LIBRARY (inline grid, dispatch-style) ============================ */
 function subHasGeo(s){ return s.lat!=null&&s.lat!==''&&s.lng!=null&&s.lng!==''; }
-const K_SUBSORT='r4m_subsort_v1';
+const K_SUBSORT=RK+'subsort_v1';
 let SUBS_SORT=load(K_SUBSORT,'az'); // 'az' | 'geo'
 /* Morton (z-order) key: interleaves lat/lng bits so map-neighbors sort adjacent */
 function mortonKey(lat,lng){
@@ -1063,7 +1083,7 @@ function renderSubsMap(fit){
   const wrap=document.getElementById('subsMapWrap');
   if(!wrap||wrap.classList.contains('hide')||!mapAvailable()) return;
   if(!subsMapInstance){
-    subsMapInstance=L.map('subsMapWrap',{zoomControl:true,zoomDelta:0.5,zoomSnap:0.5,preferCanvas:true}).setView([28.5,-81.4],8);
+    subsMapInstance=L.map('subsMapWrap',{zoomControl:true,zoomDelta:0.5,zoomSnap:0.5,preferCanvas:true}).setView(REGION_CENTER,8);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'© OpenStreetMap',maxZoom:19}).addTo(subsMapInstance);
     subsMapLayer=L.layerGroup().addTo(subsMapInstance);
     const info=L.control({position:'topright'});
@@ -1082,7 +1102,7 @@ function renderSubsMap(fit){
   const missing=list.length-located.length;
   const pts=[];
   for(const {s,i} of located){
-    const m=L.circleMarker([+s.lat,+s.lng],{radius:7,color:'#fff',weight:1.5,fillColor:'#2563eb',fillOpacity:.92});
+    const m=L.circleMarker([+s.lat,+s.lng],{radius:7,color:'#fff',weight:1.5,fillColor:REGION_COLOR,fillOpacity:.92});
     m.bindTooltip(esc(s.name),{direction:'top',offset:[0,-6]});
     m.bindPopup(`<div style="min-width:180px">
       <div style="font-weight:700;font-size:12.5px">${esc(s.name)}</div>
@@ -1486,19 +1506,19 @@ function cancelKmzScan(){ KMZ_CANCEL=true; }
 const KMZ_STOP_BTN=` <button class="small danger" data-stop style="margin-left:10px;vertical-align:middle">&#9632; Stop</button>`;
 
 /* ---- noise filter: word list that marks non-subdivision KMZs (editable, persisted) ---- */
-const K_KMZNOISE='r4m_kmznoise_v1';
+const K_KMZNOISE=RK+'kmznoise_v1';
 const KMZNOISE_DEFAULT=['asbuilt','as built','benchmark','topo','bndy','boundary','control','flood','fema','easement','esmt','utility','utilities','drainage','lot','block','exhibit','detail','sketch','untitled','place marker'];
 let KMZNOISE=load(K_KMZNOISE,KMZNOISE_DEFAULT);
 function persistKmzNoise(){ save(K_KMZNOISE,KMZNOISE); }
-const K_KMZNOISEPAT='r4m_kmznoisepat_v1';
+const K_KMZNOISEPAT=RK+'kmznoisepat_v1';
 let KMZNOISE_PATTERNS=load(K_KMZNOISEPAT,true);
 /* Files with more than this many point-pins are reference databases (benchmark
    sets, monument lists), not subdivisions — their pins are dropped wholesale.
    Overlays (site plans) are never affected. 0 disables. */
-const K_KMZMULTI='r4m_kmzmulti_v1';
+const K_KMZMULTI=RK+'kmzmulti_v1';
 let KMZ_MULTI_CAP=load(K_KMZMULTI,5);
 /* Folder names the scan never descends into (segment match, case-insensitive). */
-const K_KMZIGNORE='r4m_kmzignoredirs_v1';
+const K_KMZIGNORE=RK+'kmzignoredirs_v1';
 let KMZ_IGNORE_DIRS=load(K_KMZIGNORE,['_Archive']);
 function isIgnoredDirName(name){ return KMZ_IGNORE_DIRS.some(d=>norm(d)===norm(name)); }
 function pathHasIgnoredDir(path){ return String(path||'').split('/').some(isIgnoredDirName); }
@@ -1564,7 +1584,7 @@ function exportScanReport(){
 const KMZ_REPORT_BTN=` <button class="small" data-report style="margin-left:8px;vertical-align:middle">Scan report (CSV)</button>`;
 
 /* ---- per-file parse cache: skip re-reading KMZs that haven't changed ---- */
-const K_KMZCACHE='r4m_kmzcache_v1';
+const K_KMZCACHE=RK+'kmzcache_v1';
 let KMZCACHE=load(K_KMZCACHE,{});
 function persistKmzCache(){ try{ const n=Object.keys(KMZCACHE).length; if(n>20000) KMZCACHE={}; save(K_KMZCACHE,KMZCACHE); }catch(e){} }
 // migrate pre-v20 cache entries that stored thousands of reference-db pins —
@@ -2071,7 +2091,7 @@ document.addEventListener('click',e=>{ if(!e.target.closest('.menu-wrap')) docum
 document.getElementById('exportSubs').onclick=()=>download('subdivisions.json',JSON.stringify(SUBS,null,2));
 document.getElementById('importSubsBtn').onclick=()=>document.getElementById('importSubs').click();
 document.getElementById('importSubs').onchange=e=>{ const f=e.target.files[0]; if(!f)return; const rd=new FileReader(); rd.onload=()=>{ try{const d=JSON.parse(rd.result); if(!Array.isArray(d))throw 0; SUBS=d.map(x=>({name:x.name||'',nickname:x.nickname||'',address:x.address||'',lat:x.lat==null?null:x.lat,lng:x.lng==null?null:x.lng,aliases:x.aliases||[]})); persistSubs(); renderSubs(); showToast('Imported '+SUBS.length+' subdivisions'); }catch(err){ showToast('Invalid JSON'); } }; rd.readAsText(f); e.target.value=''; };
-document.getElementById('resetSubs').onclick=()=>{ if(confirm('Reset the subdivision library to the original seed? Your changes will be lost.')){ SUBS=JSON.parse(JSON.stringify(SUBS_SEED)); persistSubs(); renderSubs(); showToast('Reset'); } };
+document.getElementById('resetSubs').onclick=()=>{ if(confirm('Reset the subdivision library to the original seed? Your changes will be lost.')){ SUBS=JSON.parse(JSON.stringify(REGION_SUBS_SEED)); persistSubs(); renderSubs(); showToast('Reset'); } };
 document.getElementById('subsMapBtn').onclick=()=>toggleSubsMap();
 document.getElementById('subsSortBtn').onclick=()=>{
   SUBS_SORT=SUBS_SORT==='az'?'geo':'az';
@@ -2126,7 +2146,7 @@ document.getElementById('addCrewBtn').onclick=()=>editCrewModal(-1);
 document.getElementById('exportCrews').onclick=()=>download('crews.json',JSON.stringify(CREWS,null,2));
 document.getElementById('importCrewsBtn').onclick=()=>document.getElementById('importCrews').click();
 document.getElementById('importCrews').onchange=e=>{ const f=e.target.files[0]; if(!f)return; const rd=new FileReader(); rd.onload=()=>{ try{const d=JSON.parse(rd.result); if(!Array.isArray(d))throw 0; CREWS=d.map(x=>({name:x.name||'',last:x.last||'',code:x.code||'',email:x.email||'',lat:x.lat,lng:x.lng,active:x.active!==false})); persistCrews(); renderCrews(); showToast('Imported '+CREWS.length+' crews'); }catch(err){ showToast('Invalid JSON'); } }; rd.readAsText(f); e.target.value=''; };
-document.getElementById('resetCrews').onclick=()=>{ if(confirm('Reset the crew library to the original seed?')){ CREWS=JSON.parse(JSON.stringify(CREWS_SEED)); persistCrews(); renderCrews(); showToast('Reset'); } };
+document.getElementById('resetCrews').onclick=()=>{ if(confirm('Reset the crew library to the original seed?')){ CREWS=JSON.parse(JSON.stringify(REGION_CREWS_SEED)); persistCrews(); renderCrews(); showToast('Reset'); } };
 document.getElementById('crewBody').addEventListener('change',e=>{
   const t=e.target;
   if(t.dataset.togglecrew!=null){ const i=+t.dataset.togglecrew; CREWS[i].active=t.checked; persistCrews(); renderCrews(); }
@@ -2138,8 +2158,23 @@ document.getElementById('crewBody').addEventListener('click',e=>{
 });
 
 // init
-const APP_VERSION='v35 · 2026-08-19';
-document.getElementById('appVer').textContent=APP_VERSION;
+const APP_VERSION='v36 · 2026-08-26';
+document.getElementById('appVer').textContent=APP_VERSION+' · '+REGION;
+// region switcher: each region is its own workspace; a click stores the choice
+// and reloads so the whole app boots into that region's storage
+(function(){
+  document.documentElement.style.setProperty('--brand',REGION_DEFS[REGION].c);
+  document.documentElement.style.setProperty('--brand-d',REGION_DEFS[REGION].d);
+  const bar=document.getElementById('regionBar');
+  bar.innerHTML=Object.keys(REGION_DEFS).map(r=>
+    `<div class="region${r===REGION?' active':''}" data-region="${r}"${r===REGION?` style="color:${REGION_DEFS[r].c}"`:''}>${r}</div>`).join('');
+  bar.onclick=e=>{
+    const t=e.target.closest('[data-region]');
+    if(!t||t.dataset.region===REGION) return;
+    try{ localStorage.setItem(K_REGION,t.dataset.region); }catch(err){}
+    location.reload();
+  };
+})();
 renderSubs(); renderCrews();
 </script>
 </body>

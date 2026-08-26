@@ -5,16 +5,20 @@ Route4Me-ready upload — and (coming next) converts Route4Me's export back into
 the ERP's expected format.
 
 ## Use it
-Two independent pages (they never share data, even side by side):
+Open **`index.html`** in any browser. The header has four region tabs —
+**FL · HOU · DFW · ASA** — and each region is a fully separate workspace:
+its own subdivision library, crews, imports, KMZ cache and settings.
+Nothing ever crosses between regions (every region stores under its own
+browser-storage prefix). FL is the original curated model; the other three
+start empty so each region's own library can be built up.
 
-- **`index.html`** — the Florida model (blue). Curated library, production use.
-- **`company.html`** — the company-wide model (orange, titled "Company").
-  Its library is pre-seeded with the curated FL subs **plus every deduplicated
-  Customer Zone from the Geotab zones export** (~8,150 entries, FL + TX).
-  Regenerate it after changing `index.html` with `python3 build_company.py`.
+The accent color, map default view, and export filenames
+(`Route4Me Upload HOU 2026-08-26.csv`) follow the active region so files
+from different regions can't get mixed up.
 
-Open either in any browser. Nothing is uploaded; all processing happens
-locally and the libraries are saved in your browser.
+Nothing is uploaded; all processing happens locally and the libraries are
+saved in your browser. (`company_subs.json` keeps the full deduplicated
+Customer Zone list from the Geotab export as seed data for the new regions.)
 
 ### Convert (ERP → Route4Me)
 Drop your ERP CSV. The tool:
