@@ -386,6 +386,18 @@ function crewTerr(c){ const t=c&&c.terr?String(c.terr):''; return TERR.includes(
 /* territory areas drawn on the map: {terrName:[ring,...]}, ring=[[lat,lng],...] */
 const K_TERRPOLY=RK+'terrpoly_v1';
 let TERRPOLY=load(K_TERRPOLY,{});
+// heal any corrupt storage: keep only rings of >=3 finite [lat,lng] pairs —
+// one bad ring would make Leaflet throw and take the whole map down with it
+(function sanitizeTerrPoly(){
+  let changed=false;
+  for(const t of Object.keys(TERRPOLY)){
+    const ok=(Array.isArray(TERRPOLY[t])?TERRPOLY[t]:[]).filter(ring=>
+      Array.isArray(ring) && ring.length>=3 &&
+      ring.every(p=>Array.isArray(p)&&p.length>=2&&Number.isFinite(p[0])&&Number.isFinite(p[1])));
+    if(!Array.isArray(TERRPOLY[t]) || ok.length!==TERRPOLY[t].length){ changed=true; if(ok.length) TERRPOLY[t]=ok; else delete TERRPOLY[t]; }
+  }
+  if(changed){ try{ save(K_TERRPOLY,TERRPOLY); }catch(e){} }
+})();
 function persistTerrPoly(){ save(K_TERRPOLY,TERRPOLY); }
 function pointInRing(lat,lng,ring){ // ray cast, x=lng y=lat
   let inside=false;
@@ -1143,7 +1155,7 @@ function renderSubs(){
     </div>`;}).join('') || `<div class="muted" style="text-align:center;padding:36px">${SUBS.length?'no subs match the filter':'no subs yet — add one or import'}</div>`;
   const withGeo=SUBS.filter(subHasGeo).length;
   document.getElementById('subCount').textContent=`${SUBS.length} subdivisions · ${withGeo} with coordinates${SUBS.length-withGeo?` · ${SUBS.length-withGeo} without`:''}${capped?` · showing first ${SUBS_RENDER_CAP} of ${list.length} — filter to narrow`:''}`;
-  renderSubsMap(false); // keep map in step when it's open
+  try{ renderSubsMap(false); }catch(e){ console.error(e); } // a map hiccup must never break the list
 }
 
 /* small modal: set/edit one sub's coordinates by pasting "lat, long" */
@@ -1200,6 +1212,13 @@ function renderSubsMap(fit){
     subsMapLayer=L.layerGroup().addTo(subsMapInstance);
     subsMapInstance.on('click',e=>{ if(DRAW) addDrawPoint(e.latlng); });
     subsMapInstance.on('dblclick',()=>{ if(DRAW) finishDraw(); });
+    // territory shapes hide at close zoom and come back on the way out
+    let _wasAbove=false; // map always starts zoomed out (below the threshold)
+    subsMapInstance.on('zoomend',()=>{
+      const above=subsMapInstance.getZoom()>TERRPOLY_MAX_ZOOM;
+      if(above!==_wasAbove) renderTerrPolys();
+      _wasAbove=above;
+    });
     const info=L.control({position:'topright'});
     info.onAdd=()=>{ subsMapInfoEl=L.DomUtil.create('div');
       subsMapInfoEl.style.cssText='background:rgba(255,255,255,.93);border:1px solid #d1d1d6;border-radius:6px;padding:5px 9px;font-size:11px;color:#3f3f46;box-shadow:0 1px 4px rgba(0,0,0,.15);line-height:1.5';
@@ -1236,7 +1255,8 @@ function renderSubsMap(fit){
       legend='<br>'+TERR.map(t=>`<span class="terr-dot" style="background:${terrColor(t)}"></span>${esc(t)} ${located.filter(({s})=>subTerr(s)===t).length}`).join(' &nbsp;')
         +(noT?` &nbsp;<span class="terr-dot" style="background:#6b7683"></span>none ${noT}`:'');
     }
-    subsMapInfoEl.innerHTML=`<b>${located.length}</b> sub${located.length===1?'':'s'} shown${filtered?' (filtered)':''}${missing?` · <span style="color:#d97706">${missing} without coordinates</span>`:''}${legend}`;
+    const zoomedIn = TERR.length && Object.keys(TERRPOLY).length && subsMapInstance.getZoom()>TERRPOLY_MAX_ZOOM;
+    subsMapInfoEl.innerHTML=`<b>${located.length}</b> sub${located.length===1?'':'s'} shown${filtered?' (filtered)':''}${missing?` · <span style="color:#d97706">${missing} without coordinates</span>`:''}${legend}${zoomedIn?'<br><span style="color:#9a9aa2">areas hidden at this zoom — zoom out to see them</span>':''}`;
   }
   if(pendingSubFocus){
     const p=pendingSubFocus; pendingSubFocus=null;
@@ -1257,20 +1277,26 @@ function focusSubOnMap(i){
 }
 
 /* ---- territory areas: draw polygons on the map to group subs & crews ---- */
+const TERRPOLY_MAX_ZOOM=12; // hide territory shapes when zoomed in close — a
+// region-sized polygon border scaled to street level makes Chrome grind/crash
 function renderTerrPolys(){
   if(!terrPolyLayer) return;
   terrPolyLayer.clearLayers();
+  if(subsMapInstance && subsMapInstance.getZoom()>TERRPOLY_MAX_ZOOM) return;
   for(const t of TERR) (TERRPOLY[t]||[]).forEach((ring,k)=>{
-    if(ring.length<3) return;
-    const insideN=SUBS.filter(s=>subHasGeo(s)&&pointInRing(+s.lat,+s.lng,ring)).length;
-    const p=L.polygon(ring,{color:terrColor(t),weight:2,fillColor:terrColor(t),fillOpacity:.07,dashArray:'6 4',interactive:!DRAW});
-    p.bindPopup(`<div style="min-width:170px">
-      <div style="font-weight:700;color:${terrColor(t)}">${esc(t)} area</div>
-      <div style="font-size:11px;color:#6b6b73;margin:3px 0 8px">${insideN} sub${insideN===1?'':'s'} inside</div>
-      <button class="small" data-polyfill="${esc(t)}" data-k="${k}">Assign blanks inside</button>
-      <button class="small danger" data-polydel="${esc(t)}" data-k="${k}">Delete area</button>
-    </div>`);
-    terrPolyLayer.addLayer(p);
+    try{
+      if(!Array.isArray(ring)||ring.length<3) return;
+      const insideN=SUBS.filter(s=>subHasGeo(s)&&pointInRing(+s.lat,+s.lng,ring)).length;
+      // solid stroke (never dashed): canvas dash iteration over huge scaled paths hangs Chrome
+      const p=L.polygon(ring,{color:terrColor(t),weight:2,opacity:.55,fillColor:terrColor(t),fillOpacity:.07,interactive:!DRAW});
+      p.bindPopup(`<div style="min-width:170px">
+        <div style="font-weight:700;color:${terrColor(t)}">${esc(t)} area</div>
+        <div style="font-size:11px;color:#6b6b73;margin:3px 0 8px">${insideN} sub${insideN===1?'':'s'} inside</div>
+        <button class="small" data-polyfill="${esc(t)}" data-k="${k}">Assign blanks inside</button>
+        <button class="small danger" data-polydel="${esc(t)}" data-k="${k}">Delete area</button>
+      </div>`);
+      terrPolyLayer.addLayer(p);
+    }catch(e){ /* one bad ring must never take the map down */ }
   });
 }
 function renderDrawBar(){
@@ -2491,8 +2517,20 @@ document.getElementById('crewBody').addEventListener('click',e=>{
   if(t.dataset.delcrew!=null){ const i=+t.dataset.delcrew; if(confirm('Delete crew "'+CREWS[i].name+'"?')){ CREWS.splice(i,1); persistCrews(); renderCrews(); } }
 });
 
+// surface script errors instead of dying silently — shows the first error in a
+// dismissible red bar so problems can be reported with the actual message
+let _errShown=false;
+window.addEventListener('error',ev=>{
+  if(_errShown) return; _errShown=true;
+  const d=document.createElement('div');
+  d.style.cssText='position:fixed;left:12px;right:12px;bottom:12px;z-index:99;background:#fef2f2;border:1px solid #dc2626;color:#991b1b;border-radius:10px;padding:10px 14px;font-size:12.5px;display:flex;gap:10px;align-items:center;box-shadow:0 8px 24px rgba(0,0,0,.15)';
+  d.innerHTML=`<b>Something broke:</b> <span style="flex:1;font-family:ui-monospace,Menlo,monospace">${esc(String(ev.message||'unknown error'))}${ev.lineno?' (line '+ev.lineno+')':''}</span>
+    <button class="small" onclick="this.parentNode.remove()">Dismiss</button>`;
+  document.body.appendChild(d);
+});
+
 // init
-const APP_VERSION='v39 · 2026-08-27';
+const APP_VERSION='v40 · 2026-08-27';
 document.getElementById('appVer').textContent=APP_VERSION+' · '+REGION;
 // region switcher: each region is its own workspace; a click stores the choice
 // and reloads so the whole app boots into that region's storage
