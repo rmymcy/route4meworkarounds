@@ -119,10 +119,6 @@
     background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:7px 12px;margin-bottom:5px;font-size:13px;
     box-shadow:var(--shadow);transition:border-color .08s}
   .sub-card2:hover{border-color:#c3ccd8}
-  /* with territories defined, both grids gain a Terr column */
-  .subs-grid-head.terr,.sub-card2.terr{grid-template-columns:26px 1.6fr 1fr 1.6fr 150px 78px 2fr 96px}
-  .terr-select{font:inherit;font-size:11.5px;font-weight:600;padding:4px 4px;border:1px solid var(--line);border-radius:6px;background:var(--panel);width:100%;cursor:pointer}
-  .terr-dot{width:10px;height:10px;border-radius:50%;display:inline-block;vertical-align:-1px;margin-right:6px}
   .sub-card2 input[type=text]{padding:5px 8px;font-size:12.5px}
   .dot{width:9px;height:9px;border-radius:50%;display:inline-block}
   .dot-green{background:var(--ok)} .dot-amber{background:var(--warn)}
@@ -224,7 +220,6 @@
       <h2>3. Download</h2>
       <div class="stat" id="stats"></div>
       <div style="margin:16px 0" id="warnBox"></div>
-      <div class="row" id="dlSplit" style="flex-wrap:wrap;gap:8px;margin-bottom:10px"></div>
       <div class="row">
         <button class="primary" id="downloadBtn">Download Route4Me CSV</button>
         <button id="reviewUnmatchedBtn" class="hide">Fix unmatched subs</button>
@@ -245,7 +240,7 @@
       </div>
 
       <div id="drop3" class="drop">
-        <p style="margin:0 0 8px"><b>Drag &amp; drop</b> the Route4Me export(s) (file03) here &mdash; several at once is fine (one per territory) &mdash; or</p>
+        <p style="margin:0 0 8px"><b>Drag &amp; drop</b> the Route4Me export(s) (file03) here &mdash; several at once is fine, they merge &mdash; or</p>
         <button class="primary" id="pick3Btn">Choose file(s)&hellip;</button>
         <input type="file" id="file3" accept=".csv,text/csv" multiple class="hide">
         <p id="file3Name" class="muted" style="margin:12px 0 0"></p>
@@ -271,7 +266,6 @@
         <input type="search" class="grow" id="subSearch" placeholder="Filter&hellip;">
         <button class="small" id="subsMapBtn">&#128205; Map</button>
         <button class="small" id="subsSortBtn" title="toggle list order: alphabetical or grouped by geography">Sort: A&ndash;Z</button>
-        <button class="small" id="terrBtn" title="split this region's work into separate Route4Me uploads">Territories&hellip;</button>
         <button class="primary small" id="addSubBtn">+ Add</button>
         <button class="small" id="kmzBtn">KMZ&hellip;</button>
         <input type="file" id="kmzFile" accept=".kmz,.kml" multiple class="hide">
@@ -294,7 +288,6 @@
         <div class="subs-grid-head" id="subsGridHead"></div>
         <div id="subsList" style="max-height:56vh;overflow-y:auto"></div>
       </div>
-      <div id="terrDrawBar" class="hide" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px"></div>
       <div id="subsMapWrap" class="hide"></div>
       <p class="muted" id="subCount" style="margin:10px 2px 0"></p>
     </div>
@@ -321,7 +314,7 @@
       </div>
       <div class="tablewrap">
         <table>
-          <thead><tr><th style="width:52px">On</th><th>Crew</th><th style="width:90px">Servicer Id</th><th style="width:96px" id="crewTerrTh">Territory</th><th>Depot label</th><th style="width:170px">Lat / Long</th><th style="width:90px"></th></tr></thead>
+          <thead><tr><th style="width:52px">On</th><th>Crew</th><th style="width:90px">Servicer Id</th><th>Depot label</th><th style="width:170px">Lat / Long</th><th style="width:90px"></th></tr></thead>
           <tbody id="crewBody"></tbody>
         </table>
       </div>
@@ -372,54 +365,10 @@ let CREWS = load(K_CREWS,REGION_CREWS_SEED);
 function persistSubs(){ save(K_SUBS,SUBS); }
 function persistCrews(){ save(K_CREWS,CREWS); }
 
-/* ---- territories: split one region's work into separate Route4Me uploads ----
-   Each sub (and crew) can belong to a territory; Send then produces one file02
-   per territory. A crew with no territory has its depot included in every file. */
-const K_TERR=RK+'territories_v1';
-const TERR_SEED = REGION==='FL' ? ['ORL','JAX'] : [];
-let TERR = load(K_TERR,TERR_SEED).filter(t=>typeof t==='string'&&t.trim());
-function persistTerr(){ save(K_TERR,TERR); }
-const TERR_COLORS=['#2563eb','#d97706','#16a34a','#9333ea','#dc2626','#0891b2','#65a30d','#db2777'];
-function terrColor(t){ const k=TERR.indexOf(t); return k<0 ? '#6b7683' : TERR_COLORS[k%TERR_COLORS.length]; }
-function subTerr(s){ const t=s&&s.terr?String(s.terr):''; return TERR.includes(t)?t:''; }
-function crewTerr(c){ const t=c&&c.terr?String(c.terr):''; return TERR.includes(t)?t:''; }
-/* territory areas drawn on the map: {terrName:[ring,...]}, ring=[[lat,lng],...] */
-const K_TERRPOLY=RK+'terrpoly_v1';
-let TERRPOLY=load(K_TERRPOLY,{});
-// heal any corrupt storage: keep only rings of >=3 finite [lat,lng] pairs —
-// one bad ring would make Leaflet throw and take the whole map down with it
-(function sanitizeTerrPoly(){
-  let changed=false;
-  for(const t of Object.keys(TERRPOLY)){
-    const ok=(Array.isArray(TERRPOLY[t])?TERRPOLY[t]:[]).filter(ring=>
-      Array.isArray(ring) && ring.length>=3 &&
-      ring.every(p=>Array.isArray(p)&&p.length>=2&&Number.isFinite(p[0])&&Number.isFinite(p[1])));
-    if(!Array.isArray(TERRPOLY[t]) || ok.length!==TERRPOLY[t].length){ changed=true; if(ok.length) TERRPOLY[t]=ok; else delete TERRPOLY[t]; }
-  }
-  if(changed){ try{ save(K_TERRPOLY,TERRPOLY); }catch(e){} }
-})();
-function persistTerrPoly(){ save(K_TERRPOLY,TERRPOLY); }
-function pointInRing(lat,lng,ring){ // ray cast, x=lng y=lat
-  let inside=false;
-  for(let i=0,j=ring.length-1;i<ring.length;j=i++){
-    const xi=ring[i][1], yi=ring[i][0], xj=ring[j][1], yj=ring[j][0];
-    if(((yi>lat)!==(yj>lat)) && (lng < (xj-xi)*(lat-yi)/(yj-yi)+xi)) inside=!inside;
-  }
-  return inside;
-}
-function terrForPoint(lat,lng){ // which drawn area contains this point ('' if none)
-  if(lat==null||lng==null||lat===''||lng===''||!isFinite(+lat)||!isFinite(+lng)) return '';
-  for(const t of TERR) for(const ring of (TERRPOLY[t]||[]))
-    if(ring.length>=3 && pointInRing(+lat,+lng,ring)) return t;
-  return '';
-}
-function assignInsideRing(t,ring,overwrite){ // returns counts; overwrite=false only fills blanks
-  let ns=0,nc=0;
-  for(const s of SUBS) if(subHasGeo(s) && pointInRing(+s.lat,+s.lng,ring) && (overwrite||!subTerr(s)) && s.terr!==t){ s.terr=t; ns++; }
-  for(const c of CREWS) if(c.lat!=null&&c.lng!=null&&isFinite(+c.lat) && pointInRing(+c.lat,+c.lng,ring) && (overwrite||!crewTerr(c)) && c.terr!==t){ c.terr=t; nc++; }
-  if(ns) persistSubs(); if(nc) persistCrews();
-  return {ns,nc};
-}
+// territories were removed — clean up their old storage keys in every region
+(function(){ try{ for(const p of ['r4m_','r4m_hou_','r4m_dfw_','r4m_asa_'])
+  for(const k of ['territories_v1','terrpoly_v1']) localStorage.removeItem(p+k); }catch(e){} })();
+
 
 /* ============================ MATCHING ============================ */
 function norm(s){ return String(s==null?'':s).trim().toLowerCase().replace(/\s+/g,' '); }
@@ -591,7 +540,6 @@ function buildFile02(rows){
   }
   const unmatched=new Map(); // erpName -> {count}
   const noCoords=new Map();  // matched sub name -> count (sub exists but has no lat/long yet)
-  const jobRows=[];          // {row, terr} — territory comes from the matched sub
   let matched=0, jobs=0;
   for(let r=1;r<rows.length;r++){
     let cells=rows[r];
@@ -599,9 +547,8 @@ function buildFile02(rows){
     jobs++;
     const subVal=cells[iSub]!=null?cells[iSub]:'';
     const m=matchSub(subVal, idx);
-    let lat='', lng='', terr='';
+    let lat='', lng='';
     if(m.sub){
-      terr=subTerr(m.sub);
       const hasCoords = m.sub.lat!=null && m.sub.lat!=='' && m.sub.lng!=null && m.sub.lng!=='';
       if(hasCoords){ lat=fmtCoord(m.sub.lat); lng=fmtCoord(m.sub.lng); matched++; }
       else noCoords.set(m.sub.name,(noCoords.get(m.sub.name)||0)+1);
@@ -611,37 +558,19 @@ function buildFile02(rows){
       const rec=unmatched.get(key)||{count:0};
       rec.count++; unmatched.set(key,rec);
     }
-    jobRows.push({row:reshape(cells, lat, lng, ''), terr});
+    out.push(reshape(cells, lat, lng, ''));
   }
-  // depot rows (active crews only); a crew with no territory rides in every file
+  // depot rows (active crews only)
   const activeCrews=CREWS.filter(isActive);
-  const depotRows=activeCrews.map(cw=>{
+  for(const cw of activeCrews){
     const cells=new Array(header.length).fill('');
     cells[iAddr]=(cw.name||'')+' Home';
     if(routeDate) cells[iSched]=routeDate;
-    return {row:reshape(cells, fmtCoord(cw.lat), fmtCoord(cw.lng), '1'), terr:crewTerr(cw)};
-  });
-  for(const r of jobRows) out.push(r.row);
-  for(const d of depotRows) out.push(d.row);
+    out.push(reshape(cells, fmtCoord(cw.lat), fmtCoord(cw.lng), '1'));
+  }
 
   const outName=`Route4Me Upload ${REGION} ${todayStamp()}.csv`;
-  // territory split: one file per territory that has jobs, plus a "No territory"
-  // bucket for jobs whose sub has no territory yet (only when territories exist)
-  let files=null, noTerrCrews=0;
-  if(TERR.length){
-    files=[];
-    const headerRow=out[0];
-    for(const t of [...TERR,'']){
-      const jr=jobRows.filter(r=>r.terr===t);
-      if(!jr.length) continue;
-      const dr=depotRows.filter(d=>d.terr===t||d.terr==='');
-      files.push({terr:t, jobs:jr.length, depots:dr.length,
-        rows:[headerRow, ...jr.map(r=>r.row), ...dr.map(d=>d.row)],
-        outName:`Route4Me Upload ${REGION} ${t||'NO TERRITORY'} ${todayStamp()}.csv`});
-    }
-    noTerrCrews=depotRows.filter(d=>d.terr==='').length;
-  }
-  return {rows:out, outName, files, noTerrCrews, routeDate, unmatched, noCoords, matched, jobs, depots:activeCrews.length};
+  return {rows:out, outName, routeDate, unmatched, noCoords, matched, jobs, depots:activeCrews.length};
 }
 function isActive(cw){ return cw.active!==false; } // default on unless explicitly false
 function todayStamp(){ const d=new Date(); const p=n=>String(n).padStart(2,'0'); return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`; }
@@ -790,37 +719,13 @@ function renderResult(res){
   }
   if(res.routeDate) blocks.push(`<div class="note">Schedule_Date stamped <b>${esc(res.routeDate)}</b> on every row for Route4Me
     &mdash; the Sage import (file04) keeps the original dates (it's rebuilt from file01).</div>`);
-  if(res.files){
-    const noTerr=res.files.find(f=>f.terr==='');
-    if(noTerr) blocks.push(`<div class="unmatched"><span class="badge warn">No territory</span>
-      <div style="margin-top:8px"><b>${noTerr.jobs}</b> job(s) are in subs with no territory assigned &mdash; they go to a separate
-      &ldquo;NO TERRITORY&rdquo; file. Assign territories on the Subdivisions tab (or use Territories&hellip; &rarr; Auto-assign).</div></div>`);
-    if(res.files.length>1 && res.noTerrCrews) blocks.push(`<div class="note">${res.noTerrCrews} crew(s) have no territory,
-      so their depot rows are included in <b>every</b> file &mdash; set crew territories on the Crews tab to split them.</div>`);
-  }
   warn.innerHTML = blocks.length ? blocks.join('') : `<div class="note">All subdivisions matched. Ready to upload to Route4Me.</div>`;
-  const split=document.getElementById('dlSplit'), dlBtn=document.getElementById('downloadBtn');
-  if(res.files && res.files.length){
-    split.innerHTML=res.files.map((f,k)=>
-      `<button data-dlfile="${k}" style="border-left:4px solid ${terrColor(f.terr)}">
-        &darr; ${esc(f.terr||'NO TERRITORY')} &mdash; ${f.jobs} job${f.jobs===1?'':'s'} · ${f.depots} depot${f.depots===1?'':'s'}</button>`).join('');
-    dlBtn.textContent=`Download all (${res.files.length} file${res.files.length===1?'':'s'})`;
-    document.getElementById('outName').textContent='one upload per territory: '+res.files.map(f=>f.terr||'NO TERRITORY').join(' · ');
-  }else{
-    split.innerHTML='';
-    dlBtn.textContent='Download Route4Me CSV';
-    document.getElementById('outName').textContent='will save as: '+res.outName;
-  }
+  document.getElementById('outName').textContent='will save as: '+res.outName;
 }
 
-function downloadFile02(f){ download(f.outName, toCSV(f.rows), 'text/csv'); }
 function downloadResult(){
   if(!lastResult) return;
-  if(lastResult.files && lastResult.files.length){
-    lastResult.files.forEach((f,k)=>setTimeout(()=>downloadFile02(f), k*400)); // staggered so the browser allows each
-    return;
-  }
-  downloadFile02(lastResult);
+  download(lastResult.outName, toCSV(lastResult.rows), 'text/csv');
 }
 
 /* ============================ BRING BACK (file03 -> file04) ============================ */
@@ -1041,7 +946,7 @@ function openUnmatchedModal(unmatched, onResolvedRerun){
           persistSubs(); return;
         }
         const aliases = norm(name)!==norm(entry.raw)&&entry.raw ? [entry.raw] : [];
-        SUBS.push({name,nickname:'',address:'',lat,lng,terr:terrForPoint(lat,lng),aliases});
+        SUBS.push({name,nickname:'',address:'',lat,lng,aliases});
         persistSubs();
         markResolved(entry,name,'create');
       }
@@ -1109,7 +1014,7 @@ function subsFilterList(){
   const q=norm(document.getElementById('subSearch').value);
   const list=SUBS.map((s,i)=>({s,i}))
     .filter(({s})=>!q || norm(s.name).includes(q) || norm(s.nickname||'').includes(q)
-      || norm(s.address||'').includes(q) || norm(subTerr(s)).includes(q) || (s.aliases||[]).some(a=>norm(a).includes(q)));
+      || norm(s.address||'').includes(q) || (s.aliases||[]).some(a=>norm(a).includes(q)));
   if(SUBS_SORT==='geo'){
     list.sort((a,b)=>{
       const ga=subHasGeo(a.s), gb=subHasGeo(b.s);
@@ -1128,13 +1033,12 @@ function renderSubs(){
   const {list}=subsFilterList();
   const capped=list.length>SUBS_RENDER_CAP;
   const shown=capped?list.slice(0,SUBS_RENDER_CAP):list;
-  const hasTerr=TERR.length>0;
   const head=document.getElementById('subsGridHead');
-  head.className='subs-grid-head'+(hasTerr?' terr':'');
-  head.innerHTML=`<div></div><div>Name</div><div>Nickname</div><div>Address</div><div>Lat / Long</div>${hasTerr?'<div>Territory</div>':''}<div>Aliases</div><div style="text-align:right">Actions</div>`;
+  head.className='subs-grid-head';
+  head.innerHTML=`<div></div><div>Name</div><div>Nickname</div><div>Address</div><div>Lat / Long</div><div>Aliases</div><div style="text-align:right">Actions</div>`;
   body.innerHTML=shown.map(({s,i})=>{
     const geo=subHasGeo(s);
-    return `<div class="sub-card2${hasTerr?' terr':''}" data-i="${i}">
+    return `<div class="sub-card2" data-i="${i}">
       <div style="display:flex;justify-content:center"><span class="dot ${geo?'dot-green':'dot-amber'}" title="${geo?'has coordinates':'no coordinates yet'}"></span></div>
       <input type="text" value="${esc(s.name)}" data-f="name" data-i="${i}" title="rename">
       <input type="text" value="${esc(s.nickname||'')}" data-f="nickname" data-i="${i}" placeholder="nickname&hellip;">
@@ -1142,8 +1046,6 @@ function renderSubs(){
       <div class="geo-cell ${geo?'ok':'no'}" data-geo="${i}" title="click to set / edit coordinates">
         ${geo?`${(+s.lat).toFixed(4)}<br>${(+s.lng).toFixed(4)}`:'no geo — set'}
       </div>
-      ${hasTerr?`<select class="terr-select" data-terr="${i}" title="territory (splits the Route4Me upload)" style="color:${terrColor(subTerr(s))}">
-        <option value="">—</option>${TERR.map(t=>`<option value="${esc(t)}"${subTerr(s)===t?' selected':''}>${esc(t)}</option>`).join('')}</select>`:''}
       <div class="alias-wrap">
         ${(s.aliases||[]).map((a,ai)=>`<span class="alias-chip"><span>${esc(a)}</span><button data-adel="${i}" data-ai="${ai}" title="remove alias">&times;</button></span>`).join('')}
         <button class="alias-add" data-aadd="${i}">+ alias</button>
@@ -1180,7 +1082,6 @@ function openGeoEditor(i){
     const m=v.match(/^\s*(-?\d+(?:\.\d+)?)\s*[,;\s]\s*(-?\d+(?:\.\d+)?)\s*$/);
     if(!m){ showToast('Could not read that — paste like "28.1876, -81.5534"'); return; }
     s.lat=+m[1]; s.lng=+m[2];
-    if(!subTerr(s)) s.terr=terrForPoint(s.lat,s.lng); // fresh coords may land inside a drawn area
     persistSubs(); root.innerHTML=''; renderSubs(); showToast('Coordinates set');
   };
   document.getElementById('geo_save').onclick=commit;
@@ -1188,19 +1089,16 @@ function openGeoEditor(i){
 }
 
 /* ============================ SUBS MAP (Leaflet — all subs + per-sub focus) ============================ */
-let subsMapInstance=null, subsMapLayer=null, terrPolyLayer=null, subsMapInfoEl=null, _subsMapLastFilter=null, pendingSubFocus=null, _focusPin=null;
-let DRAW=null; // {terr, pts:[[lat,lng],...], shape} while drawing a territory area
+let subsMapInstance=null, subsMapLayer=null, subsMapInfoEl=null, _subsMapLastFilter=null, pendingSubFocus=null, _focusPin=null;
 function mapAvailable(){ return typeof L!=='undefined'; }
 function toggleSubsMap(force){
   const mapWrap=document.getElementById('subsMapWrap'), listWrap=document.getElementById('subsListWrap'), btn=document.getElementById('subsMapBtn');
   const show = force!==undefined ? force : mapWrap.classList.contains('hide');
   if(show && !mapAvailable()){ showToast('Map needs internet (Leaflet + OpenStreetMap tiles) — reconnect and reload'); return; }
-  if(!show && DRAW) cancelDraw();
   mapWrap.classList.toggle('hide',!show);
-  document.getElementById('terrDrawBar').classList.toggle('hide',!show||!TERR.length);
   listWrap.classList.toggle('hide',show);
   btn.classList.toggle('primary',show);
-  if(show){ renderDrawBar(); renderSubsMap(true); }
+  if(show) renderSubsMap(true);
 }
 function renderSubsMap(fit){
   const wrap=document.getElementById('subsMapWrap');
@@ -1208,17 +1106,7 @@ function renderSubsMap(fit){
   if(!subsMapInstance){
     subsMapInstance=L.map('subsMapWrap',{zoomControl:true,zoomDelta:0.5,zoomSnap:0.5,preferCanvas:true}).setView(REGION_CENTER,8);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'© OpenStreetMap',maxZoom:19}).addTo(subsMapInstance);
-    terrPolyLayer=L.layerGroup().addTo(subsMapInstance); // areas under the pins
     subsMapLayer=L.layerGroup().addTo(subsMapInstance);
-    subsMapInstance.on('click',e=>{ if(DRAW) addDrawPoint(e.latlng); });
-    subsMapInstance.on('dblclick',()=>{ if(DRAW) finishDraw(); });
-    // territory shapes hide at close zoom and come back on the way out
-    let _wasAbove=false; // map always starts zoomed out (below the threshold)
-    subsMapInstance.on('zoomend',()=>{
-      const above=subsMapInstance.getZoom()>TERRPOLY_MAX_ZOOM;
-      if(above!==_wasAbove) renderTerrPolys();
-      _wasAbove=above;
-    });
     const info=L.control({position:'topright'});
     info.onAdd=()=>{ subsMapInfoEl=L.DomUtil.create('div');
       subsMapInfoEl.style.cssText='background:rgba(255,255,255,.93);border:1px solid #d1d1d6;border-radius:6px;padding:5px 9px;font-size:11px;color:#3f3f46;box-shadow:0 1px 4px rgba(0,0,0,.15);line-height:1.5';
@@ -1234,30 +1122,19 @@ function renderSubsMap(fit){
   const located=list.filter(({s})=>subHasGeo(s));
   const missing=list.length-located.length;
   const pts=[];
-  renderTerrPolys();
   for(const {s,i} of located){
-    const m=L.circleMarker([+s.lat,+s.lng],{radius:7,color:'#fff',weight:1.5,fillColor:TERR.length?terrColor(subTerr(s)):REGION_COLOR,fillOpacity:.92,interactive:!DRAW});
+    const m=L.circleMarker([+s.lat,+s.lng],{radius:7,color:'#fff',weight:1.5,fillColor:REGION_COLOR,fillOpacity:.92});
     m.bindTooltip(esc(s.name),{direction:'top',offset:[0,-6]});
     m.bindPopup(`<div style="min-width:180px">
       <div style="font-weight:700;font-size:12.5px">${esc(s.name)}</div>
       ${s.nickname?`<div style="font-size:11px;color:#6b6b73">&ldquo;${esc(s.nickname)}&rdquo;</div>`:''}
-      ${TERR.length?`<div style="font-size:11px;font-weight:700;color:${terrColor(subTerr(s))};margin-top:2px">${esc(subTerr(s)||'no territory')}</div>`:''}
       ${s.address?`<div style="font-size:11px;color:#6b6b73;margin-top:2px">${esc(s.address)}</div>`:''}
       <div style="font-size:11px;color:#6b6b73;margin-top:3px;font-variant-numeric:tabular-nums">${(+s.lat).toFixed(6)}, ${(+s.lng).toFixed(6)}</div>
     </div>`);
     subsMapLayer.addLayer(m);
     pts.push([+s.lat,+s.lng]);
   }
-  if(subsMapInfoEl){
-    let legend='';
-    if(TERR.length){
-      const noT=located.filter(({s})=>!subTerr(s)).length;
-      legend='<br>'+TERR.map(t=>`<span class="terr-dot" style="background:${terrColor(t)}"></span>${esc(t)} ${located.filter(({s})=>subTerr(s)===t).length}`).join(' &nbsp;')
-        +(noT?` &nbsp;<span class="terr-dot" style="background:#6b7683"></span>none ${noT}`:'');
-    }
-    const zoomedIn = TERR.length && Object.keys(TERRPOLY).length && subsMapInstance.getZoom()>TERRPOLY_MAX_ZOOM;
-    subsMapInfoEl.innerHTML=`<b>${located.length}</b> sub${located.length===1?'':'s'} shown${filtered?' (filtered)':''}${missing?` · <span style="color:#d97706">${missing} without coordinates</span>`:''}${legend}${zoomedIn?'<br><span style="color:#9a9aa2">areas hidden at this zoom — zoom out to see them</span>':''}`;
-  }
+  if(subsMapInfoEl) subsMapInfoEl.innerHTML=`<b>${located.length}</b> sub${located.length===1?'':'s'} shown${filtered?' (filtered)':''}${missing?` · <span style="color:#d97706">${missing} without coordinates</span>`:''}`;
   if(pendingSubFocus){
     const p=pendingSubFocus; pendingSubFocus=null;
     setTimeout(()=>{
@@ -1276,195 +1153,6 @@ function focusSubOnMap(i){
   toggleSubsMap(true);
 }
 
-/* ---- territory areas: draw polygons on the map to group subs & crews ---- */
-const TERRPOLY_MAX_ZOOM=12; // hide territory shapes when zoomed in close — a
-// region-sized polygon border scaled to street level makes Chrome grind/crash
-function renderTerrPolys(){
-  if(!terrPolyLayer) return;
-  terrPolyLayer.clearLayers();
-  if(subsMapInstance && subsMapInstance.getZoom()>TERRPOLY_MAX_ZOOM) return;
-  for(const t of TERR) (TERRPOLY[t]||[]).forEach((ring,k)=>{
-    try{
-      if(!Array.isArray(ring)||ring.length<3) return;
-      const insideN=SUBS.filter(s=>subHasGeo(s)&&pointInRing(+s.lat,+s.lng,ring)).length;
-      // solid stroke (never dashed): canvas dash iteration over huge scaled paths hangs Chrome
-      const p=L.polygon(ring,{color:terrColor(t),weight:2,opacity:.55,fillColor:terrColor(t),fillOpacity:.07,interactive:!DRAW});
-      p.bindPopup(`<div style="min-width:170px">
-        <div style="font-weight:700;color:${terrColor(t)}">${esc(t)} area</div>
-        <div style="font-size:11px;color:#6b6b73;margin:3px 0 8px">${insideN} sub${insideN===1?'':'s'} inside</div>
-        <button class="small" data-polyfill="${esc(t)}" data-k="${k}">Assign blanks inside</button>
-        <button class="small danger" data-polydel="${esc(t)}" data-k="${k}">Delete area</button>
-      </div>`);
-      terrPolyLayer.addLayer(p);
-    }catch(e){ /* one bad ring must never take the map down */ }
-  });
-}
-function renderDrawBar(){
-  const bar=document.getElementById('terrDrawBar');
-  if(!TERR.length){ bar.classList.add('hide'); return; }
-  const polyN=TERR.reduce((a,t)=>a+((TERRPOLY[t]||[]).length),0);
-  if(DRAW){
-    bar.innerHTML=`<b style="color:${terrColor(DRAW.terr)}">Drawing ${esc(DRAW.terr)} area</b>
-      <span class="muted" style="font-size:12px">click the map to add corners (${DRAW.pts.length}) &mdash; clicks near another area's corner <b>snap to it</b> (no gaps) &mdash; double-click, Enter, or Finish to close; Esc cancels</span>
-      <button class="small primary" id="drawFinish" ${DRAW.pts.length<3?'disabled':''}>&check; Finish</button>
-      <button class="small" id="drawCancel">&times; Cancel</button>`;
-    document.getElementById('drawFinish').onclick=finishDraw;
-    document.getElementById('drawCancel').onclick=cancelDraw;
-  }else{
-    bar.innerHTML=`<span class="muted" style="font-size:12px">Territory areas:</span>
-      <select id="drawTerrSel" class="terr-select" style="width:auto">${TERR.map(t=>`<option value="${esc(t)}">${esc(t)}</option>`).join('')}</select>
-      <button class="small" id="drawStart">&#9998; Draw area</button>
-      ${polyN?`<button class="small" id="polyFillAll" title="give every sub/crew with no territory the area it sits in">Assign blanks from areas (${polyN})</button>`:
-        `<span class="muted" style="font-size:12px">&mdash; draw a shape around a group of pins to assign them all at once</span>`}`;
-    document.getElementById('drawStart').onclick=()=>startDraw(document.getElementById('drawTerrSel').value);
-    const fa=document.getElementById('polyFillAll');
-    if(fa) fa.onclick=()=>{
-      let ns=0,nc=0;
-      for(const t of TERR) for(const ring of (TERRPOLY[t]||[])){ const r=assignInsideRing(t,ring,false); ns+=r.ns; nc+=r.nc; }
-      showToast(ns||nc?`Assigned ${ns} sub${ns===1?'':'s'} + ${nc} crew${nc===1?'':'s'} from areas`:'No blanks inside any area');
-      renderSubs(); renderCrews(); renderSubsMap(false);
-    };
-  }
-}
-function startDraw(t){
-  if(!subsMapInstance||!TERR.includes(t)) return;
-  DRAW={terr:t,pts:[],shape:null,dots:[]};
-  subsMapInstance.doubleClickZoom.disable();
-  renderDrawBar(); renderSubsMap(false); // pins & areas go non-interactive so clicks land on the map
-}
-function snapToPolyCorner(latlng){
-  // clicks near an existing area's corner lock onto that exact vertex, so
-  // neighboring territories share borders with no gaps
-  const p=subsMapInstance.latLngToContainerPoint(latlng);
-  let best=null, bestD=14; // px, zoom-independent
-  for(const t of TERR) for(const ring of (TERRPOLY[t]||[])) for(const v of ring){
-    const q=subsMapInstance.latLngToContainerPoint(L.latLng(v[0],v[1]));
-    const d=Math.hypot(p.x-q.x,p.y-q.y);
-    if(d<bestD){ bestD=d; best=v; }
-  }
-  return best ? {ll:L.latLng(best[0],best[1]), snapped:true} : {ll:latlng, snapped:false};
-}
-function addDrawPoint(latlng){
-  const s=snapToPolyCorner(latlng);
-  DRAW.pts.push([s.ll.lat,s.ll.lng]);
-  if(DRAW.shape) DRAW.shape.remove();
-  DRAW.shape=(DRAW.pts.length>2?L.polygon:L.polyline)(DRAW.pts,{color:terrColor(DRAW.terr),weight:2,fillOpacity:.12}).addTo(subsMapInstance);
-  DRAW.dots.push(L.circleMarker(s.ll,{radius:s.snapped?6:4,color:s.snapped?'#111827':terrColor(DRAW.terr),weight:2,fillColor:'#fff',fillOpacity:1,interactive:false}).addTo(subsMapInstance));
-  renderDrawBar();
-}
-function endDraw(){
-  if(DRAW){ if(DRAW.shape) DRAW.shape.remove(); (DRAW.dots||[]).forEach(d=>d.remove()); }
-  DRAW=null;
-  if(subsMapInstance) subsMapInstance.doubleClickZoom.enable();
-  renderDrawBar(); renderSubsMap(false);
-}
-function cancelDraw(){ endDraw(); }
-function finishDraw(){
-  if(!DRAW) return;
-  if(DRAW.pts.length<3){ showToast('Click at least 3 corners first'); return; }
-  const t=DRAW.terr, ring=DRAW.pts;
-  (TERRPOLY[t]=TERRPOLY[t]||[]).push(ring);
-  persistTerrPoly();
-  const r=assignInsideRing(t,ring,true); // drawing is deliberate — everything inside becomes t
-  endDraw();
-  renderSubs(); renderCrews();
-  showToast(`${t} area saved — ${r.ns} sub${r.ns===1?'':'s'} + ${r.nc} crew${r.nc===1?'':'s'} assigned`);
-}
-// popup buttons inside Leaflet live in the map pane — delegate at document level
-document.addEventListener('click',e=>{
-  const del=e.target.closest('[data-polydel]'), fill=e.target.closest('[data-polyfill]');
-  if(!del&&!fill) return;
-  const b=del||fill, t=b.dataset.polydel||b.dataset.polyfill, k=+b.dataset.k;
-  const rings=TERRPOLY[t]; if(!rings||!rings[k]) return;
-  if(del){
-    if(!confirm(`Delete this ${t} area? (subs keep their current territory)`)) return;
-    rings.splice(k,1); if(!rings.length) delete TERRPOLY[t];
-    persistTerrPoly();
-  }else{
-    const r=assignInsideRing(t,rings[k],false);
-    showToast(r.ns||r.nc?`Assigned ${r.ns} sub(s) + ${r.nc} crew(s) to ${t}`:'No blanks inside this area');
-  }
-  if(subsMapInstance) subsMapInstance.closePopup();
-  renderSubs(); renderCrews(); renderSubsMap(false); renderDrawBar();
-});
-document.addEventListener('keydown',e=>{
-  if(!DRAW) return;
-  if(e.key==='Escape'){ e.preventDefault(); cancelDraw(); }
-  else if(e.key==='Enter'){ e.preventDefault(); finishDraw(); }
-});
-
-/* ============================ TERRITORIES ============================ */
-function openTerrModal(){
-  const root=document.getElementById('modalRoot');
-  const stash=load(K_LASTIMPORT,null);
-  const render=()=>{
-    const counts=t=>({subs:SUBS.filter(s=>subTerr(s)===t).length, crews:CREWS.filter(c=>crewTerr(c)===t).length});
-    const rows=TERR.map((t,k)=>{ const c=counts(t);
-      return `<div style="display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;margin-bottom:6px">
-        <span class="terr-dot" style="background:${terrColor(t)}"></span><b style="flex:0 0 90px">${esc(t)}</b>
-        <span class="muted" style="flex:1;font-size:12px">${c.subs} sub${c.subs===1?'':'s'} · ${c.crews} crew${c.crews===1?'':'s'}</span>
-        <button class="icon-btn danger" data-tdel="${k}" title="remove territory">&times;</button></div>`; }).join('');
-    root.innerHTML=`<div class="backdrop"><div class="modal"><div class="mh"><h3>Territories — ${REGION}</h3>
-      <div class="muted" style="font-size:12.5px;margin-top:4px">Each territory becomes its own Route4Me upload file.
-      Assign subs by <b>drawing areas on the map</b> (&#128205; Map &rarr; Draw area), in the library grid, or auto-assign below.</div></div>
-    <div class="mb">
-      ${rows||'<div class="muted" style="padding:10px 0">No territories yet — the Send tab makes one combined file.</div>'}
-      <div class="row" style="margin-top:12px">
-        <input type="text" id="terrNew" placeholder="New territory (e.g. ORL)" style="flex:1" maxlength="12">
-        <button class="primary small" id="terrAdd">Add</button>
-      </div>
-      <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line)">
-        <button class="small" id="terrAuto" ${stash&&stash.text&&TERR.length?'':'disabled'}>Auto-assign blanks by Map Code</button>
-        <div class="muted" style="font-size:11.5px;margin-top:6px">Reads the last Sage import: a job whose Map Code starts with a
-        territory name (ORL3 &rarr; ORL, JAX1 &rarr; JAX) sets that territory on its matched sub &mdash; only subs with no territory yet.
-        ${stash&&stash.text?'':'<b>No Sage import stored yet.</b>'}</div>
-      </div>
-    </div>
-    <div class="mf"><button id="terrClose">Done</button></div></div></div>`;
-    document.getElementById('terrClose').onclick=()=>{
-      root.innerHTML=''; renderSubs(); renderCrews();
-      const mapOpen=!document.getElementById('subsMapWrap').classList.contains('hide');
-      document.getElementById('terrDrawBar').classList.toggle('hide',!mapOpen||!TERR.length);
-      if(mapOpen){ renderDrawBar(); renderSubsMap(false); }
-    };
-    const add=()=>{
-      const v=document.getElementById('terrNew').value.trim().toUpperCase();
-      if(!v) return;
-      if(TERR.some(t=>norm(t)===norm(v))){ showToast('Already exists'); return; }
-      TERR.push(v); persistTerr(); render();
-    };
-    document.getElementById('terrAdd').onclick=add;
-    document.getElementById('terrNew').addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); add(); } });
-    root.querySelectorAll('[data-tdel]').forEach(b=>b.onclick=()=>{
-      const t=TERR[+b.dataset.tdel];
-      const n=SUBS.filter(s=>subTerr(s)===t).length+CREWS.filter(c=>crewTerr(c)===t).length;
-      if(!confirm(`Remove "${t}"?${n?` It will be cleared from ${n} sub(s)/crew(s).`:''}`)) return;
-      TERR.splice(+b.dataset.tdel,1);
-      SUBS.forEach(s=>{ if(s.terr===t) s.terr=''; });
-      CREWS.forEach(c=>{ if(c.terr===t) c.terr=''; });
-      delete TERRPOLY[t]; persistTerrPoly();
-      persistTerr(); persistSubs(); persistCrews(); render();
-    });
-    const auto=document.getElementById('terrAuto');
-    if(auto && !auto.disabled) auto.onclick=()=>{
-      let rows2; try{ rows2=parseCSV(stash.text).filter(r=>r.some(c=>String(c).trim()!=='')); }catch(e){ showToast('Stored Sage import is unreadable'); return; }
-      const iMap=findCol(rows2[0],'Map Code'), iSub2=findCol(rows2[0],'Subdiv Name');
-      if(iMap<0||iSub2<0){ showToast('Stored import has no Map Code / Subdiv Name columns'); return; }
-      const idx=buildIndex(); let set=0, seen=new Set();
-      for(let r=1;r<rows2.length;r++){
-        const mc=norm(rows2[r][iMap]); if(!mc) continue;
-        const t=TERR.find(x=>mc.startsWith(norm(x))); if(!t) continue;
-        const m=matchSub(rows2[r][iSub2]!=null?rows2[r][iSub2]:'', idx);
-        if(m.sub && !subTerr(m.sub) && !seen.has(m.sub.name)){ m.sub.terr=t; seen.add(m.sub.name); set++; }
-      }
-      persistSubs();
-      showToast(set?`${set} sub${set===1?'':'s'} assigned from Map Codes`:'Nothing to assign — no blank subs matched a territory Map Code');
-      render();
-    };
-  };
-  render();
-}
-
 /* ============================ CREWS TABLE ============================ */
 function renderCrews(){
   const q=norm(document.getElementById('crewSearch').value);
@@ -1477,8 +1165,6 @@ function renderCrews(){
       <td><label class="switch"><input type="checkbox" data-togglecrew="${i}" ${on?'checked':''}><span class="track"></span></label></td>
       <td><b>${esc(c.name)} ${esc(c.last||'')}</b> ${on?'<span class="badge ok">Working</span>':'<span class="badge warn">Day off</span>'}${c.email?`<div class="muted" style="font-size:11px">${esc(c.email)}</div>`:''}</td>
       <td>${c.code?`<span class="chip" style="background:#eef6ff;color:#2563eb;font-weight:700">${esc(c.code)}</span>`:'<span class="badge err">no code</span>'}</td>
-      <td>${TERR.length?`<select class="terr-select" data-crewterr="${i}" title="only this territory's upload gets this depot; — = every upload" style="color:${terrColor(crewTerr(c))}">
-        <option value="">— all</option>${TERR.map(t=>`<option value="${esc(t)}"${crewTerr(c)===t?' selected':''}>${esc(t)}</option>`).join('')}</select>`:'<span class="muted">—</span>'}</td>
       <td class="muted">${esc(c.name)} Home</td>
       <td class="pin">${fmtCoord(c.lat)}, ${fmtCoord(c.lng)}</td>
       <td><button class="small" data-editcrew="${i}">Edit</button> <button class="small danger" data-delcrew="${i}">Del</button></td>
@@ -1518,7 +1204,6 @@ function editSubModal(i){
     if(lat!==''&&(!isFinite(+lat)||!isFinite(+lng))){ showToast('Valid lat & long required'); return; }
     const rec={name,nickname:document.getElementById('e_nick').value.trim(),address:document.getElementById('e_addr').value.trim(),
       lat:lat===''?null:+lat,lng:lng===''?null:+lng,
-      terr:(isNew||!(s.terr||'')) ? terrForPoint(lat===''?null:+lat,lng===''?null:+lng) : s.terr,
       aliases:document.getElementById('e_aliases').value.split('\n').map(x=>x.trim()).filter(Boolean)};
     if(isNew) SUBS.push(rec); else SUBS[i]=rec;
     persistSubs(); root.innerHTML=''; renderSubs(); showToast('Saved');
@@ -1556,8 +1241,7 @@ function editCrewModal(i){
     const lng=document.getElementById('c_lng').value.trim();
     if(!name){ showToast('Crew name required'); return; }
     if(lat===''||lng===''||!isFinite(+lat)||!isFinite(+lng)){ showToast('Valid lat & long required'); return; }
-    const rec={terr:(isNew||!(CREWS[i].terr||'')) ? terrForPoint(+lat,+lng) : CREWS[i].terr,
-      name,last:document.getElementById('c_last').value.trim(),code:document.getElementById('c_code').value.trim(),
+    const rec={name,last:document.getElementById('c_last').value.trim(),code:document.getElementById('c_code').value.trim(),
       email:document.getElementById('c_email').value.trim(),
       lat:+lat,lng:+lng,active:isNew?true:isActive(CREWS[i])};
     if(isNew) CREWS.push(rec); else CREWS[i]=rec;
@@ -1752,7 +1436,7 @@ async function processCrewsFile(f){
         c.lat=lat; c.lng=lng;
         updated++;
       } else {
-        CREWS.push({name:first,last,email,code,lat,lng,active:true,terr:terrForPoint(lat,lng)});
+        CREWS.push({name:first,last,email,code,lat,lng,active:true});
         added++;
       }
     }
@@ -2312,11 +1996,11 @@ function applyKmz(){
     if(r.status==='new'){
       const nm=(r.newName||r.name||'').trim(); if(!nm) continue;
       const existing=SUBS.find(s=>norm(s.name)===norm(nm));
-      if(existing){ if(!subHasGeo(existing)){ existing.lat=rnd(r.lat); existing.lng=rnd(r.lng); if(!subTerr(existing)) existing.terr=terrForPoint(existing.lat,existing.lng); filled++; } }
-      else { SUBS.push({name:nm, nickname:'', address:'(from KMZ)', lat:rnd(r.lat), lng:rnd(r.lng), terr:terrForPoint(r.lat,r.lng), aliases:[]}); added++; }
+      if(existing){ if(!subHasGeo(existing)){ existing.lat=rnd(r.lat); existing.lng=rnd(r.lng); filled++; } }
+      else { SUBS.push({name:nm, nickname:'', address:'(from KMZ)', lat:rnd(r.lat), lng:rnd(r.lng), aliases:[]}); added++; }
     } else {
       const sub=SUBS.find(s=>s.name===r.subName); if(!sub) continue;
-      sub.lat=rnd(r.lat); sub.lng=rnd(r.lng); if(!subTerr(sub)) sub.terr=terrForPoint(sub.lat,sub.lng); filled++;
+      sub.lat=rnd(r.lat); sub.lng=rnd(r.lng); filled++;
     }
   }
   persistSubs(); document.getElementById('modalRoot').innerHTML=''; renderSubs();
@@ -2405,16 +2089,11 @@ document.getElementById('f1pickBtn').onclick=()=>document.getElementById('f1file
 document.getElementById('f1file').onchange=e=>{ const f=e.target.files[0]; if(!f)return; const rd=new FileReader(); rd.onload=()=>{ setFile01(rd.result,f.name,false); if(file03Text) runReverse(); }; rd.readAsText(f); };
 document.getElementById('download4Btn').onclick=download4;
 document.getElementById('downloadBtn').onclick=downloadResult;
-document.getElementById('dlSplit').addEventListener('click',e=>{
-  const t=e.target.closest('[data-dlfile]'); if(!t||!lastResult||!lastResult.files) return;
-  const f=lastResult.files[+t.dataset.dlfile]; if(f) downloadFile02(f);
-});
 document.getElementById('reviewUnmatchedBtn').onclick=()=>{ if(lastResult&&lastResult.unmatched.size&&lastGenHeader) openUnmatchedModal(lastResult.unmatched,()=>runConvertRows(lastGenHeader,lastGenRows)); };
 
 // subs
 document.getElementById('subSearch').oninput=renderSubs;
 document.getElementById('addSubBtn').onclick=()=>editSubModal(-1);
-document.getElementById('terrBtn').onclick=openTerrModal;
 document.getElementById('kmzBtn').onclick=()=>document.getElementById('kmzFile').click();
 document.getElementById('kmzFile').onchange=e=>{ const fs=[...e.target.files]; if(fs.length) processKmzFiles(fs); e.target.value=''; };
 document.getElementById('kmzDirBtn').onclick=()=>{
@@ -2445,7 +2124,7 @@ for(const [btn,menu] of [['subsMenuBtn','subsMenu'],['crewsMenuBtn','crewsMenu']
 document.addEventListener('click',e=>{ if(!e.target.closest('.menu-wrap')) document.querySelectorAll('.menu.open').forEach(m=>m.classList.remove('open')); });
 document.getElementById('exportSubs').onclick=()=>download('subdivisions.json',JSON.stringify(SUBS,null,2));
 document.getElementById('importSubsBtn').onclick=()=>document.getElementById('importSubs').click();
-document.getElementById('importSubs').onchange=e=>{ const f=e.target.files[0]; if(!f)return; const rd=new FileReader(); rd.onload=()=>{ try{const d=JSON.parse(rd.result); if(!Array.isArray(d))throw 0; SUBS=d.map(x=>({name:x.name||'',nickname:x.nickname||'',address:x.address||'',lat:x.lat==null?null:x.lat,lng:x.lng==null?null:x.lng,terr:x.terr||'',aliases:x.aliases||[]})); persistSubs(); renderSubs(); showToast('Imported '+SUBS.length+' subdivisions'); }catch(err){ showToast('Invalid JSON'); } }; rd.readAsText(f); e.target.value=''; };
+document.getElementById('importSubs').onchange=e=>{ const f=e.target.files[0]; if(!f)return; const rd=new FileReader(); rd.onload=()=>{ try{const d=JSON.parse(rd.result); if(!Array.isArray(d))throw 0; SUBS=d.map(x=>({name:x.name||'',nickname:x.nickname||'',address:x.address||'',lat:x.lat==null?null:x.lat,lng:x.lng==null?null:x.lng,aliases:x.aliases||[]})); persistSubs(); renderSubs(); showToast('Imported '+SUBS.length+' subdivisions'); }catch(err){ showToast('Invalid JSON'); } }; rd.readAsText(f); e.target.value=''; };
 document.getElementById('resetSubs').onclick=()=>{ if(confirm('Reset the subdivision library to the original seed? Your changes will be lost.')){ SUBS=JSON.parse(JSON.stringify(REGION_SUBS_SEED)); persistSubs(); renderSubs(); showToast('Reset'); } };
 document.getElementById('subsMapBtn').onclick=()=>toggleSubsMap();
 document.getElementById('subsSortBtn').onclick=()=>{
@@ -2458,10 +2137,6 @@ document.getElementById('subsSortBtn').innerHTML='Sort: '+(SUBS_SORT==='geo'?'Re
 const subsListEl=document.getElementById('subsList');
 subsListEl.addEventListener('change',e=>{
   const t=e.target;
-  if(t.dataset.terr!=null){
-    const s=SUBS[+t.dataset.terr]; if(!s) return;
-    s.terr=t.value; persistSubs(); renderSubs(); return;
-  }
   if(t.dataset.f==null||t.dataset.i==null) return;
   const s=SUBS[+t.dataset.i]; if(!s) return;
   const v=t.value.trim();
@@ -2504,12 +2179,11 @@ document.getElementById('crewSearch').oninput=renderCrews;
 document.getElementById('addCrewBtn').onclick=()=>editCrewModal(-1);
 document.getElementById('exportCrews').onclick=()=>download('crews.json',JSON.stringify(CREWS,null,2));
 document.getElementById('importCrewsBtn').onclick=()=>document.getElementById('importCrews').click();
-document.getElementById('importCrews').onchange=e=>{ const f=e.target.files[0]; if(!f)return; const rd=new FileReader(); rd.onload=()=>{ try{const d=JSON.parse(rd.result); if(!Array.isArray(d))throw 0; CREWS=d.map(x=>({name:x.name||'',last:x.last||'',code:x.code||'',email:x.email||'',lat:x.lat,lng:x.lng,active:x.active!==false,terr:x.terr||''})); persistCrews(); renderCrews(); showToast('Imported '+CREWS.length+' crews'); }catch(err){ showToast('Invalid JSON'); } }; rd.readAsText(f); e.target.value=''; };
+document.getElementById('importCrews').onchange=e=>{ const f=e.target.files[0]; if(!f)return; const rd=new FileReader(); rd.onload=()=>{ try{const d=JSON.parse(rd.result); if(!Array.isArray(d))throw 0; CREWS=d.map(x=>({name:x.name||'',last:x.last||'',code:x.code||'',email:x.email||'',lat:x.lat,lng:x.lng,active:x.active!==false})); persistCrews(); renderCrews(); showToast('Imported '+CREWS.length+' crews'); }catch(err){ showToast('Invalid JSON'); } }; rd.readAsText(f); e.target.value=''; };
 document.getElementById('resetCrews').onclick=()=>{ if(confirm('Reset the crew library to the original seed?')){ CREWS=JSON.parse(JSON.stringify(REGION_CREWS_SEED)); persistCrews(); renderCrews(); showToast('Reset'); } };
 document.getElementById('crewBody').addEventListener('change',e=>{
   const t=e.target;
   if(t.dataset.togglecrew!=null){ const i=+t.dataset.togglecrew; CREWS[i].active=t.checked; persistCrews(); renderCrews(); }
-  if(t.dataset.crewterr!=null){ const i=+t.dataset.crewterr; CREWS[i].terr=t.value; persistCrews(); renderCrews(); }
 });
 document.getElementById('crewBody').addEventListener('click',e=>{
   const t=e.target;
@@ -2530,7 +2204,7 @@ window.addEventListener('error',ev=>{
 });
 
 // init
-const APP_VERSION='v40 · 2026-08-27';
+const APP_VERSION='v41 · 2026-08-27';
 document.getElementById('appVer').textContent=APP_VERSION+' · '+REGION;
 // region switcher: each region is its own workspace; a click stores the choice
 // and reloads so the whole app boots into that region's storage
