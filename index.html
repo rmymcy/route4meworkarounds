@@ -180,7 +180,7 @@
     <div class="tab active" data-tab="convert">Send to Route4Me</div>
     <div class="tab" data-tab="bring">Bring back to Sage</div>
     <div class="tab" data-tab="subs">Subdivisions</div>
-    <div class="tab" data-tab="crews">Crews / Depots</div>
+    <div class="tab" data-tab="crews">Crews</div>
   </nav>
 </header>
 
@@ -312,7 +312,7 @@
       </div>
       <div class="tablewrap">
         <table>
-          <thead><tr><th style="width:52px">On</th><th>Crew</th><th style="width:90px">Servicer Id</th><th>Depot label</th><th style="width:170px">Lat / Long</th><th style="width:90px"></th></tr></thead>
+          <thead><tr><th style="width:52px">On</th><th>Crew</th><th style="width:90px">Servicer Id</th><th style="width:170px">Home Lat / Long</th><th style="width:90px"></th></tr></thead>
           <tbody id="crewBody"></tbody>
         </table>
       </div>
@@ -507,8 +507,9 @@ function buildFile02(rows){
   const out=[];
 
   // ---- Output column plan ----
-  // Front-load the columns you map in Route4Me, in this order:
-  //   Address 1, Latitude, Longitude, Priority, Schedule_Date, Depot
+  // Jobs go to Route4Me as ORDERS (territories + start locations live in
+  // Route4Me now), so no depot rows and no Depot column. Front-load the
+  // columns you map — Address 1, Latitude, Longitude, Priority, Schedule_Date —
   // then every remaining original column in its original order (nothing dropped).
   const iPrio=findCol(header,'Priority');
   const iSched=findCol(header,'Schedule_Date');
@@ -520,13 +521,12 @@ function buildFile02(rows){
   plan.push({k:'lng'});
   addOrig(iPrio);
   addOrig(iSched);
-  plan.push({k:'depot'});
   for(let c=0;c<header.length;c++) addOrig(c); // the rest, in original order
-  function reshape(cells, latVal, lngVal, depotVal){
+  function reshape(cells, latVal, lngVal){
     return plan.map(s=> s.k==='orig' ? (cells[s.i]==null?'':cells[s.i])
-      : s.k==='lat' ? latVal : s.k==='lng' ? lngVal : depotVal);
+      : s.k==='lat' ? latVal : lngVal);
   }
-  out.push(reshape(header, LAT_H, LNG_H, DEPOT_H)); // header row (orig specs yield padded header names)
+  out.push(reshape(header, LAT_H, LNG_H)); // header row (orig specs yield padded header names)
 
   const unmatched=new Map(); // erpName -> {count}
   const noCoords=new Map();  // matched sub name -> count (sub exists but has no lat/long yet)
@@ -547,18 +547,11 @@ function buildFile02(rows){
       const rec=unmatched.get(key)||{count:0};
       rec.count++; unmatched.set(key,rec);
     }
-    out.push(reshape(cells, lat, lng, ''));
-  }
-  // depot rows (active crews only)
-  const activeCrews=CREWS.filter(isActive);
-  for(const cw of activeCrews){
-    const cells=new Array(header.length).fill('');
-    cells[iAddr]=(cw.name||'')+' Home';
-    out.push(reshape(cells, fmtCoord(cw.lat), fmtCoord(cw.lng), '1'));
+    out.push(reshape(cells, lat, lng));
   }
 
   const outName=`Route4Me Upload ${REGION} ${todayStamp()}.csv`;
-  return {rows:out, outName, unmatched, noCoords, matched, jobs, depots:activeCrews.length};
+  return {rows:out, outName, unmatched, noCoords, matched, jobs};
 }
 function isActive(cw){ return cw.active!==false; } // default on unless explicitly false
 function todayStamp(){ const d=new Date(); const p=n=>String(n).padStart(2,'0'); return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`; }
@@ -683,7 +676,7 @@ function renderResult(res){
     <div><b>${res.jobs}</b>job rows</div>
     <div><b>${res.matched}</b>geocoded</div>
     <div><b>${res.unmatched.size}</b>unmatched</div>
-    <div><b>${res.depots}</b>active depots</div>`;
+    <div><b>${res.jobs-res.matched}</b>blank coords</div>`;
   const warn=document.getElementById('warnBox');
   const blocks=[];
   if(res.unmatched.size){
@@ -1147,7 +1140,6 @@ function renderCrews(){
       <td><label class="switch"><input type="checkbox" data-togglecrew="${i}" ${on?'checked':''}><span class="track"></span></label></td>
       <td><b>${esc(c.name)} ${esc(c.last||'')}</b> ${on?'<span class="badge ok">Working</span>':'<span class="badge warn">Day off</span>'}${c.email?`<div class="muted" style="font-size:11px">${esc(c.email)}</div>`:''}</td>
       <td>${c.code?`<span class="chip" style="background:#eef6ff;color:#2563eb;font-weight:700">${esc(c.code)}</span>`:'<span class="badge err">no code</span>'}</td>
-      <td class="muted">${esc(c.name)} Home</td>
       <td class="pin">${fmtCoord(c.lat)}, ${fmtCoord(c.lng)}</td>
       <td><button class="small" data-editcrew="${i}">Edit</button> <button class="small danger" data-delcrew="${i}">Del</button></td>
     </tr>`;}).join('');
@@ -1199,7 +1191,7 @@ function editCrewModal(i){
     <div class="mb">
       <div class="split" style="margin-bottom:12px">
         <div><label class="fld">First name</label><input type="text" id="c_name" value="${esc(c.name)}" placeholder="Hunter">
-          <div class="muted" style="font-size:11px;margin-top:4px">Depot row: &ldquo;<span id="c_prev">${esc(c.name||'Name')}</span> Home&rdquo;</div></div>
+          <div class="muted" style="font-size:11px;margin-top:4px">Home location &mdash; used as a Route4Me start location reference</div></div>
         <div><label class="fld">Last name</label><input type="text" id="c_last" value="${esc(c.last||'')}" placeholder="Cope">
           <div class="muted" style="font-size:11px;margin-top:4px">Must match the Route4Me driver name</div></div>
       </div>
@@ -1215,7 +1207,6 @@ function editCrewModal(i){
     </div>
     <div class="mf"><button id="c_cancel">Cancel</button><button class="primary" id="c_save">Save</button></div>
   </div></div>`;
-  document.getElementById('c_name').oninput=e=>document.getElementById('c_prev').textContent=e.target.value||'Name';
   document.getElementById('c_cancel').onclick=()=>root.innerHTML='';
   document.getElementById('c_save').onclick=()=>{
     const name=document.getElementById('c_name').value.trim();
@@ -2186,7 +2177,7 @@ window.addEventListener('error',ev=>{
 });
 
 // init
-const APP_VERSION='v42 · 2026-08-27';
+const APP_VERSION='v43 · 2026-08-27';
 document.getElementById('appVer').textContent=APP_VERSION+' · '+REGION;
 // region switcher: each region is its own workspace; a click stores the choice
 // and reloads so the whole app boots into that region's storage
