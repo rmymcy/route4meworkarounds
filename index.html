@@ -920,7 +920,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
         <label class="muted" style="font-size:12px;display:flex;align-items:center;gap:6px" title="Adds a &ldquo;Scheduled For&rdquo; column with this date on every job — Route4Me auto-schedules the orders for that day. Clear it to leave the column out. Sage's own Schedule_Date is untouched.">
           Schedule for <input type="date" id="schedFor" style="padding:5px 8px;font:inherit;font-size:12.5px;border:1px solid var(--line);border-radius:8px"></label>
         <button class="small" id="prioBtn" title="priority by task type × due date — writes a Priority column into the Route4Me file">Priority&hellip;</button>
-        <button class="small" id="colsBtn" title="choose which columns go to Route4Me (core: Address 1, Alias, Lat, Long, Svc Job Num)">Columns&hellip;</button>
+        <button class="small" id="colsBtn" title="choose which columns go to Route4Me (core: Alias, Lat, Long, Svc Job Num)">Columns&hellip;</button>
         <button class="primary" id="genBtn">Build Route4Me file &rarr;</button>
       </div>
       <div class="tablewrap" style="max-height:52vh">
@@ -1206,7 +1206,7 @@ function convert(text, sourceName){
 }
 /* file02 extra columns (beyond the locked core), chosen in "Columns…" — per region */
 const K_F02COLS=RK+'file02cols_v1';
-const F02_CORE=['Address 1','Latitude','Longitude','Svc Job Num','Depot']; // locked in or excluded by design
+const F02_CORE=['Latitude','Longitude','Svc Job Num','Depot']; // locked in or excluded by design
 function loadFile02Cols(){ const a=load(K_F02COLS,[]); return new Set(Array.isArray(a)?a.map(norm):[]); }
 function openColsModal(){
   if(!jobsHeader){ showToast('Load a Sage export first'); return; }
@@ -1402,7 +1402,7 @@ function buildFile02(rows){
       : n<=30?'#FFE000' : n<=40?'#FFEB80' : n<=60?'#FFF5C2' : '#FFFFFF'; };
   const plan=[], placed=new Set();
   const addOrig=i=>{ if(i>=0 && !placed.has(i) && !skip.has(i)){ plan.push({k:'orig',i}); placed.add(i); } };
-  addOrig(iAddr);
+  // no Address column: the address rides inside the Alias (re-addable via Columns…)
   plan.push({k:'alias'});
   plan.push({k:'lat'});
   plan.push({k:'lng'});
@@ -3247,7 +3247,7 @@ window.addEventListener('error',ev=>{
 });
 
 // init
-const APP_VERSION='v58 · 2026-08-28';
+const APP_VERSION='v59 · 2026-08-28';
 document.getElementById('appVer').textContent=APP_VERSION+' · '+REGION;
 // region switcher: each region is its own workspace; a click stores the choice
 // and reloads so the whole app boots into that region's storage
