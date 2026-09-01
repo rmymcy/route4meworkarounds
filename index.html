@@ -117,6 +117,14 @@
   @keyframes rushPulse{0%,100%{opacity:1}50%{opacity:.55}}
   .due-late{color:var(--err);font-weight:700}
   .due-soon{color:#d97706;font-weight:600}
+  /* welcome card */
+  .wgreet{font-size:17px;font-weight:700;margin-bottom:14px}
+  .wsteps{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+  @media(max-width:760px){.wsteps{grid-template-columns:1fr}}
+  .wstep{display:flex;gap:10px;align-items:flex-start;font-size:12.5px;line-height:1.5;color:var(--ink);
+    background:#f8fafc;border:1px solid var(--line);border-radius:10px;padding:12px}
+  .wnum{flex:0 0 22px;height:22px;border-radius:50%;background:var(--brand);color:#fff;font-size:12px;font-weight:700;
+    display:inline-flex;align-items:center;justify-content:center;margin-top:1px}
   .toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%);background:#111827;color:#fff;padding:11px 18px;border-radius:10px;font-size:13px;box-shadow:0 8px 24px rgba(0,0,0,.25);z-index:80;opacity:0;transition:.2s}
   .toast.show{opacity:1}
   footer{color:var(--muted);font-size:12px;text-align:center;padding:20px}
@@ -188,16 +196,27 @@
   </div>
   <nav class="regions" id="regionBar" title="Each region keeps its own subs, crews, imports and settings — nothing crosses"></nav>
   <nav class="tabs">
-    <div class="tab active" data-tab="convert">Send to Route4Me</div>
-    <div class="tab" data-tab="bring">Bring back to Sage</div>
-    <div class="tab" data-tab="subs">Subdivisions</div>
-    <div class="tab" data-tab="crews">Crews</div>
+    <div class="tab active" data-tab="dispatch">Dispatch</div>
+    <div class="tab" data-tab="settings">Settings</div>
   </nav>
 </header>
 
 <main>
   <!-- ================= CONVERT ================= -->
   <section id="tab-convert">
+    <div class="card" id="welcomeCard">
+      <div class="wgreet">Morning, dispatch. Here&rsquo;s the loop.</div>
+      <div class="wsteps">
+        <div class="wstep"><span class="wnum">1</span><div><b>Drop the Sage export</b><br>
+          The jobs appear below — trim what&rsquo;s not going out, and the priority matrix, aliases and colors apply themselves.</div></div>
+        <div class="wstep"><span class="wnum">2</span><div><b>Build &amp; upload to Route4Me</b><br>
+          Import the file as <i>orders</i>, pick the day, and schedule by territory. Duplicates are pre-numbered, RUSH is pre-flagged.</div></div>
+        <div class="wstep"><span class="wnum">3</span><div><b>Bring the routes back</b><br>
+          Drop the Route4Me export(s) at the bottom — you get the Sage import plus the CFF calc requests, ready to send.</div></div>
+      </div>
+      <p class="muted" style="margin:14px 2px 0;font-size:12px">Region tabs up top keep FL · HOU · DFW · ASA fully separate.
+      The subdivision library and crews live in <b>Settings</b>.</p>
+    </div>
     <div class="card">
       <h2>1. Sage export (file01)</h2>
       <div id="drop" class="drop">
@@ -242,9 +261,9 @@
   </section>
 
   <!-- ================= BRING BACK (file03 -> file04) ================= -->
-  <section id="tab-bring" class="hide">
+  <section id="tab-bring">
     <div class="card">
-      <h2>1. Route4Me export (file03)</h2>
+      <h2>4. Bring back &mdash; Route4Me export (file03)</h2>
       <label class="fld">Paired Sage export (file01)</label>
       <div id="f1box" class="note" style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:14px">
         <span id="f1status">No file01 loaded yet.</span>
@@ -261,7 +280,7 @@
     </div>
 
     <div class="card hide" id="result4Card">
-      <h2>2. Review</h2>
+      <h2>5. Sage import (file04)</h2>
       <div class="stat" id="stats4"></div>
       <div style="margin:16px 0" id="warn4Box"></div>
       <div class="row">
@@ -822,6 +841,7 @@ function loadFile01ForReview(text,name){
       For a clean run, drop the <b>raw Sage export (file01)</b> instead. You can still continue if this was intentional.</div>`;
   } else { warn.className='hide'; warn.innerHTML=''; }
   document.getElementById('trimCard').classList.remove('hide');
+  document.getElementById('welcomeCard').classList.add('hide'); // work has started — get out of the way
   document.getElementById('resultCard').classList.add('hide');
   renderJobs();
 }
@@ -2324,10 +2344,13 @@ function download(name,text,type){ const b=new Blob([text],{type:type||'applicat
 
 /* ============================ WIRING ============================ */
 // tabs
+// two top-level pages: Dispatch = the whole daily flow, Settings = subs + crews
+const TAB_GROUPS={dispatch:['convert','bring'], settings:['subs','crews']};
 document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{
   document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
   t.classList.add('active');
-  ['convert','bring','subs','crews'].forEach(id=>document.getElementById('tab-'+id).classList.toggle('hide',id!==t.dataset.tab));
+  const show=new Set(TAB_GROUPS[t.dataset.tab]||[]);
+  ['convert','bring','subs','crews'].forEach(id=>document.getElementById('tab-'+id).classList.toggle('hide',!show.has(id)));
 });
 // file / drop (file01 -> file02)
 const drop=document.getElementById('drop'), fileInput=document.getElementById('file');
@@ -2514,7 +2537,7 @@ window.addEventListener('error',ev=>{
 });
 
 // init
-const APP_VERSION='v52 · 2026-08-28';
+const APP_VERSION='v53 · 2026-08-28';
 document.getElementById('appVer').textContent=APP_VERSION+' · '+REGION;
 // region switcher: each region is its own workspace; a click stores the choice
 // and reloads so the whole app boots into that region's storage
