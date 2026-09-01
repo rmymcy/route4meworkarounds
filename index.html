@@ -206,7 +206,7 @@
         <span class="muted grow" id="trimCount"></span>
         <label class="muted" style="font-size:12px;display:flex;align-items:center;gap:6px" title="Adds a Schedule_For column with this date on every job — Route4Me auto-schedules the orders for that day. Clear it to leave the column out. Sage's own Schedule_Date is untouched.">
           Schedule for <input type="date" id="schedFor" style="padding:5px 8px;font:inherit;font-size:12.5px;border:1px solid var(--line);border-radius:8px"></label>
-        <button class="small" id="colsBtn" title="choose which columns go to Route4Me (core: Address 1, Lat, Long, Svc Job Num)">Columns&hellip;</button>
+        <button class="small" id="colsBtn" title="choose which columns go to Route4Me (core: Address 1, Alias, Lat, Long, Svc Job Num)">Columns&hellip;</button>
         <button class="primary" id="genBtn">Build Route4Me file &rarr;</button>
       </div>
       <div class="tablewrap" style="max-height:52vh">
@@ -510,7 +510,7 @@ function openColsModal(){
   const opts=jobsHeader.map(h=>String(h).trim()).filter(h=>h&&!coreNorm.has(norm(h)));
   const root=document.getElementById('modalRoot');
   root.innerHTML=`<div class="backdrop"><div class="modal" style="max-width:460px"><div class="mh"><h3>Route4Me file columns</h3>
-    <div class="muted" style="font-size:12.5px;margin-top:4px">Core columns always included: <b>Address 1, Latitude, Longitude, Svc Job Num</b>
+    <div class="muted" style="font-size:12.5px;margin-top:4px">Core columns always included: <b>Address 1, Alias (task - builder), Latitude, Longitude, Svc Job Num</b>
     (Svc Job Num is the key that splices the Route4Me export back onto the Sage export). Check anything extra you want visible in Route4Me.</div></div>
   <div class="mb" style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
     ${opts.map(h=>`<label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer">
@@ -553,20 +553,25 @@ function buildFile02(rows){
     const m=sfEl.value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
     if(m) schedFor=`${+m[2]}/${+m[3]}/${m[1]}`;
   }
+  // Alias: task + builder combined, e.g. "FORM SURVEY - Taylor Morrison (MCO"
+  const iTask=findCol(header,'Description Of Problem'), iBuild=findCol(header,'Builder Name');
+  const aliasFor=cells=>[iTask>=0?String(cells[iTask]||'').trim():'', iBuild>=0?String(cells[iBuild]||'').trim():'']
+    .filter(Boolean).join(' - ');
   const plan=[], placed=new Set();
   const addOrig=i=>{ if(i>=0 && !placed.has(i) && !skip.has(i)){ plan.push({k:'orig',i}); placed.add(i); } };
   addOrig(iAddr);
+  plan.push({k:'alias'});
   plan.push({k:'lat'});
   plan.push({k:'lng'});
   addOrig(iSvc);
   if(schedFor) plan.push({k:'sched'});
   const extras=loadFile02Cols();
   for(let c=0;c<header.length;c++) if(extras.has(norm(header[c]))) addOrig(c); // chosen extras, original order
-  function reshape(cells, latVal, lngVal, schedVal){
+  function reshape(cells, latVal, lngVal, schedVal, aliasVal){
     return plan.map(s=> s.k==='orig' ? (cells[s.i]==null?'':cells[s.i])
-      : s.k==='lat' ? latVal : s.k==='lng' ? lngVal : schedVal);
+      : s.k==='lat' ? latVal : s.k==='lng' ? lngVal : s.k==='alias' ? aliasVal : schedVal);
   }
-  out.push(reshape(header, LAT_H, LNG_H, 'Schedule_For')); // header row (orig specs yield padded header names)
+  out.push(reshape(header, LAT_H, LNG_H, 'Schedule_For', 'Alias')); // header row (orig specs yield padded header names)
 
   const unmatched=new Map(); // erpName -> {count}
   const noCoords=new Map();  // matched sub name -> count (sub exists but has no lat/long yet)
@@ -587,7 +592,7 @@ function buildFile02(rows){
       const rec=unmatched.get(key)||{count:0};
       rec.count++; unmatched.set(key,rec);
     }
-    out.push(reshape(cells, lat, lng, schedFor));
+    out.push(reshape(cells, lat, lng, schedFor, aliasFor(cells)));
   }
 
   const outName=`Route4Me Upload ${REGION} ${todayStamp()}.csv`;
@@ -2223,7 +2228,7 @@ window.addEventListener('error',ev=>{
 });
 
 // init
-const APP_VERSION='v45 · 2026-08-27';
+const APP_VERSION='v46 · 2026-08-27';
 document.getElementById('appVer').textContent=APP_VERSION+' · '+REGION;
 // region switcher: each region is its own workspace; a click stores the choice
 // and reloads so the whole app boots into that region's storage
