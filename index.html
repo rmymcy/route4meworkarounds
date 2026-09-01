@@ -595,6 +595,15 @@ function buildFile02(rows){
     }
     out.push(reshape(cells, lat, lng, schedFor, aliasFor(cells, m.sub?m.sub.name:'')));
   }
+  // same task in the same sub -> identical aliases; number them so every stop
+  // in Route4Me is distinguishable: "FORM SURVEY - Westview (1)", "(2)", ...
+  const iAlOut=plan.findIndex(s=>s.k==='alias');
+  const aliasCount=new Map(), aliasSeen=new Map();
+  for(let r=1;r<out.length;r++){ const a=out[r][iAlOut]; aliasCount.set(a,(aliasCount.get(a)||0)+1); }
+  for(let r=1;r<out.length;r++){
+    const a=out[r][iAlOut];
+    if(aliasCount.get(a)>1){ const n=(aliasSeen.get(a)||0)+1; aliasSeen.set(a,n); out[r][iAlOut]=`${a} (${n})`; }
+  }
 
   const outName=`Route4Me Upload ${REGION} ${todayStamp()}.csv`;
   return {rows:out, outName, schedFor, unmatched, noCoords, matched, jobs};
@@ -2229,7 +2238,7 @@ window.addEventListener('error',ev=>{
 });
 
 // init
-const APP_VERSION='v48 · 2026-08-27';
+const APP_VERSION='v49 · 2026-08-27';
 document.getElementById('appVer').textContent=APP_VERSION+' · '+REGION;
 // region switcher: each region is its own workspace; a click stores the choice
 // and reloads so the whole app boots into that region's storage
