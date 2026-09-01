@@ -204,6 +204,7 @@
         <button class="small danger" id="removeSelBtn">Remove selected (0)</button>
         <button class="small" id="restoreBtn">Restore removed</button>
         <span class="muted grow" id="trimCount"></span>
+        <button class="small" id="colsBtn" title="choose which columns go to Route4Me (core: Address 1, Lat, Long, Svc Job Num)">Columns&hellip;</button>
         <button class="primary" id="genBtn">Build Route4Me file &rarr;</button>
       </div>
       <div class="tablewrap" style="max-height:52vh">
@@ -496,32 +497,60 @@ function convert(text, sourceName){
   if(!rows.length) throw new Error('Empty file.');
   return buildFile02(rows);
 }
+/* file02 extra columns (beyond the locked core), chosen in "Columns…" — per region */
+const K_F02COLS=RK+'file02cols_v1';
+const F02_CORE=['Address 1','Latitude','Longitude','Svc Job Num','Depot']; // locked in or excluded by design
+function loadFile02Cols(){ const a=load(K_F02COLS,[]); return new Set(Array.isArray(a)?a.map(norm):[]); }
+function openColsModal(){
+  if(!jobsHeader){ showToast('Load a Sage export first'); return; }
+  const chosen=loadFile02Cols();
+  const coreNorm=new Set(F02_CORE.map(norm));
+  const opts=jobsHeader.map(h=>String(h).trim()).filter(h=>h&&!coreNorm.has(norm(h)));
+  const root=document.getElementById('modalRoot');
+  root.innerHTML=`<div class="backdrop"><div class="modal" style="max-width:460px"><div class="mh"><h3>Route4Me file columns</h3>
+    <div class="muted" style="font-size:12.5px;margin-top:4px">Core columns always included: <b>Address 1, Latitude, Longitude, Svc Job Num</b>
+    (Svc Job Num is the key that splices the Route4Me export back onto the Sage export). Check anything extra you want visible in Route4Me.</div></div>
+  <div class="mb" style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+    ${opts.map(h=>`<label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer">
+      <input type="checkbox" data-f02col="${esc(h)}" ${chosen.has(norm(h))?'checked':''}> ${esc(h)}</label>`).join('')}
+  </div>
+  <div class="mf"><button id="colsCancel">Cancel</button><button class="primary" id="colsSave">Save</button></div></div></div>`;
+  document.getElementById('colsCancel').onclick=()=>root.innerHTML='';
+  document.getElementById('colsSave').onclick=()=>{
+    const sel=[...root.querySelectorAll('input[data-f02col]:checked')].map(x=>x.dataset.f02col);
+    save(K_F02COLS,sel);
+    root.innerHTML='';
+    showToast(sel.length?`Saved — core + ${sel.length} extra column${sel.length===1?'':'s'}. Click Build.`:'Saved — minimal core columns only. Click Build.');
+  };
+}
+
 function buildFile02(rows){
   const header=rows[0];
   const iAddr=findCol(header,'Address 1');
   const iSub=findCol(header,'Subdiv Name');
   if(iAddr<0) throw new Error('Could not find an "Address 1" column in this file.');
   if(iSub<0) throw new Error('Could not find a "Subdiv Name" column in this file.');
+  if(findCol(header,'Svc Job Num')<0) throw new Error('Could not find a "Svc Job Num" column — it\'s required to match the Route4Me export back to Sage.');
 
   const idx=buildIndex();
   const out=[];
 
   // ---- Output column plan ----
-  // Jobs go to Route4Me as ORDERS (territories + start locations live in
-  // Route4Me now), so no depot rows and no Depot column. Front-load the
-  // columns you map — Address 1, Latitude, Longitude, Priority, Schedule_Date —
-  // then every remaining original column in its original order (nothing dropped).
-  const iPrio=findCol(header,'Priority');
-  const iSched=findCol(header,'Schedule_Date');
+  // Jobs go to Route4Me as ORDERS. Keep the upload minimal: the core columns
+  // are Address 1 (mapped to Alias), Latitude, Longitude, and Svc Job Num —
+  // the join key that must survive the Route4Me round trip so file03 can be
+  // spliced with file01 into the Sage import. Any other original column can
+  // be toggled on via "Columns…" (stored per region).
+  const iSvc=findCol(header,'Svc Job Num');
   const skip=new Set([findCol(header,LAT_H),findCol(header,LNG_H),findCol(header,DEPOT_H)].filter(x=>x>=0));
   const plan=[], placed=new Set();
   const addOrig=i=>{ if(i>=0 && !placed.has(i) && !skip.has(i)){ plan.push({k:'orig',i}); placed.add(i); } };
   addOrig(iAddr);
   plan.push({k:'lat'});
   plan.push({k:'lng'});
-  addOrig(iPrio);
-  addOrig(iSched);
-  for(let c=0;c<header.length;c++) addOrig(c); // the rest, in original order
+  addOrig(iSvc);
+  const extras=loadFile02Cols();
+  for(let c=0;c<header.length;c++) if(extras.has(norm(header[c]))) addOrig(c); // chosen extras, original order
   function reshape(cells, latVal, lngVal){
     return plan.map(s=> s.k==='orig' ? (cells[s.i]==null?'':cells[s.i])
       : s.k==='lat' ? latVal : lngVal);
@@ -2023,6 +2052,7 @@ document.getElementById('removeSelBtn').onclick=()=>{
   const n=jobsSel.size; jobsSel.clear(); jobsAnchor=null; renderJobs(); showToast(`Removed ${n} job(s)`);
 };
 document.getElementById('restoreBtn').onclick=()=>{ jobsRows.forEach(r=>r.removed=false); renderJobs(); showToast('Restored'); };
+document.getElementById('colsBtn').onclick=openColsModal;
 document.getElementById('genBtn').onclick=()=>{
   const kept=jobsRows.filter(r=>!r.removed).map(r=>r.cells);
   if(!kept.length){ showToast('No jobs left to send'); return; }
@@ -2177,7 +2207,7 @@ window.addEventListener('error',ev=>{
 });
 
 // init
-const APP_VERSION='v43 · 2026-08-27';
+const APP_VERSION='v44 · 2026-08-27';
 document.getElementById('appVer').textContent=APP_VERSION+' · '+REGION;
 // region switcher: each region is its own workspace; a click stores the choice
 // and reloads so the whole app boots into that region's storage
