@@ -698,11 +698,12 @@ function buildFile02(rows){
     const m=sfEl.value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
     if(m) schedFor=`${+m[2]}/${+m[3]}/${m[1]}`;
   }
-  // Alias: task + subdivision combined, e.g. "FORM SURVEY - Laureate Park".
+  // Alias: task - subdivision - address, e.g. "FORM SURVEY - Laureate Park - 9620 Duflo Way".
   // Uses the full library sub name when matched (Sage's Subdiv Name is truncated).
   const iTask=findCol(header,'Description Of Problem');
   const aliasFor=(cells,subName)=>[iTask>=0?String(cells[iTask]||'').trim():'',
-    String(subName||cells[iSub]||'').trim()].filter(Boolean).join(' - ');
+    String(subName||cells[iSub]||'').trim(),
+    String(cells[iAddr]||'').trim()].filter(Boolean).join(' - ');
   // priority matrix (two clocks): hottest of Due-clock and Received-clock values
   const PRIOMX=loadPrioMx();
   const prioOn=prioMxActive(PRIOMX) && iTask>=0;
@@ -2579,7 +2580,7 @@ window.addEventListener('error',ev=>{
 });
 
 // init
-const APP_VERSION='v56 · 2026-08-28';
+const APP_VERSION='v57 · 2026-08-28';
 document.getElementById('appVer').textContent=APP_VERSION+' · '+REGION;
 // region switcher: each region is its own workspace; a click stores the choice
 // and reloads so the whole app boots into that region's storage
