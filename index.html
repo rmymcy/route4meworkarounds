@@ -106,6 +106,17 @@
   .unmatched .cnt{color:var(--muted);font-size:12px}
   .grid3{display:grid;grid-template-columns:1fr 1fr auto;gap:8px;align-items:end;margin-top:8px}
   .note{font-size:12px;padding:10px 12px;border-radius:8px;background:#eff4ff;color:#334e9e;border:1px solid #d7e3ff}
+  /* dispatch-style chips for the import job table */
+  .job-status{display:inline-block;font-size:10px;text-transform:uppercase;font-weight:600;border-radius:3px;padding:1px 6px;border:1px solid rgba(107,114,128,.4);color:#475467;background:rgba(154,163,175,.1)}
+  .job-status-cff{color:#ca8a04;background:rgba(202,138,4,.13);border-color:rgba(202,138,4,.4)}
+  .job-status-if{color:#0891b2;background:rgba(8,145,178,.12);border-color:rgba(8,145,178,.4)}
+  .job-status-fv{color:#16a34a;background:rgba(22,163,74,.12);border-color:rgba(22,163,74,.4)}
+  .job-status-fe{color:#6b7280;background:rgba(107,114,128,.1);border-color:rgba(107,114,128,.4)}
+  .task-badge{display:inline-block;font-size:9.5px;font-weight:700;border-radius:3px;padding:1px 6px;border:1px solid;white-space:nowrap}
+  .rush-badge{display:inline-block;font-size:9.5px;font-weight:700;border-radius:3px;padding:1px 7px;background:var(--err);color:#fff;animation:rushPulse 1.6s ease-in-out infinite}
+  @keyframes rushPulse{0%,100%{opacity:1}50%{opacity:.55}}
+  .due-late{color:var(--err);font-weight:700}
+  .due-soon{color:#d97706;font-weight:600}
   .toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%);background:#111827;color:#fff;padding:11px 18px;border-radius:10px;font-size:13px;box-shadow:0 8px 24px rgba(0,0,0,.25);z-index:80;opacity:0;transition:.2s}
   .toast.show{opacity:1}
   footer{color:var(--muted);font-size:12px;text-align:center;padding:20px}
@@ -840,12 +851,54 @@ function renderJobs(){
   const body=document.getElementById('jobsBody');
   body.innerHTML=view.map(r=>`<tr data-id="${r.id}" class="${jobsSel.has(r.id)?'sel':''}">`+
     `<td><input type="checkbox" data-cb="${r.id}" ${jobsSel.has(r.id)?'checked':''}></td>`+
-    jobsCols.map(c=>`<td>${esc(String(r.cells[c.i]==null?'':r.cells[c.i]).trim())}</td>`).join('')+`</tr>`).join('');
+    jobsCols.map(c=>`<td>${jobCellHtml(c.name, String(r.cells[c.i]==null?'':r.cells[c.i]).trim())}</td>`).join('')+`</tr>`).join('');
   const removed=jobsRows.filter(r=>r.removed).length;
-  document.getElementById('trimCount').textContent=`${view.length} jobs${removed?` · ${removed} removed`:''} · ${jobsSel.size} selected`;
+  const live=jobsRows.filter(r=>!r.removed);
+  const iStatC=findCol(jobsHeader,'Status Code'), iPrioC=findCol(jobsHeader,'Priority');
+  const cffN=iStatC>=0?live.filter(r=>norm(r.cells[iStatC])==='cff').length:0;
+  const rushRe=/^[a-z]{1,3}$/i;
+  const rushN=iPrioC>=0?live.filter(r=>rushRe.test(String(r.cells[iPrioC]||'').trim())).length:0;
+  document.getElementById('trimCount').textContent=`${view.length} jobs${removed?` · ${removed} removed`:''}${cffN?` · ${cffN} CFF`:''}${rushN?` · ${rushN} rush`:''} · ${jobsSel.size} selected`;
   document.getElementById('removeSelBtn').textContent=`Remove selected (${jobsSel.size})`;
   const all=document.getElementById('jobsAll');
   if(all) all.checked = view.length>0 && view.every(r=>jobsSel.has(r.id));
+}
+/* dispatch-style cell rendering for the import table: status chips, task
+   badges, RUSH pulse, and due-date coloring by working-day distance */
+function statusChipHtml(code){
+  const v=String(code||'').trim(); if(!v) return '';
+  const cls={cff:'job-status-cff','if':'job-status-if',fv:'job-status-fv',fe:'job-status-fe'}[norm(v)]||'';
+  return `<span class="job-status ${cls}">${esc(v)}</span>`;
+}
+function taskColor(t){ let h=0; const s=norm(t); for(let i=0;i<s.length;i++) h=(h*31+s.charCodeAt(i))>>>0; return h%360; }
+function taskBadgeHtml(t){
+  const v=String(t||'').trim(); if(!v) return '';
+  const h=taskColor(v);
+  return `<span class="task-badge" style="color:hsl(${h} 65% 34%);background:hsl(${h} 65% 45% / .12);border-color:hsl(${h} 65% 45% / .4)">${esc(v)}</span>`;
+}
+function workdayDiff(key){ // working days from today to the date (negative = past); weekends skipped
+  if(key==null) return null;
+  const due=new Date(Math.floor(key/10000),Math.floor(key/100)%100-1,key%100);
+  const t=new Date(), today=new Date(t.getFullYear(),t.getMonth(),t.getDate());
+  if(due.getTime()===today.getTime()) return 0;
+  const step=due>today?1:-1; let d=new Date(today), n=0;
+  for(let i=0;i<250 && d.getTime()!==due.getTime();i++){ d.setDate(d.getDate()+step); if(d.getDay()!==0&&d.getDay()!==6) n+=step; }
+  return n;
+}
+function jobCellHtml(colName, raw){
+  if(colName==='Status Code') return statusChipHtml(raw);
+  if(colName==='Description Of Problem') return taskBadgeHtml(raw);
+  if(colName==='Priority'){
+    if(/^[a-z]{1,3}$/i.test(raw)) return `<span class="rush-badge">${esc(raw.toUpperCase()==='R'?'RUSH':raw.toUpperCase())}</span>`;
+    return esc(raw);
+  }
+  if(colName==='Schedule_Date'){
+    const n=workdayDiff(parseDateKey(raw));
+    if(n!=null && n<0) return `<span class="due-late">${esc(raw)}</span>`;
+    if(n!=null && n<=1) return `<span class="due-soon">${esc(raw)}</span>`;
+    return esc(raw);
+  }
+  return esc(raw);
 }
 function jobsClick(e){
   const tr=e.target.closest('tr[data-id]'); if(!tr) return;
@@ -924,6 +977,54 @@ function crewByName(first,last){
   return c||null;
 }
 
+/* CFF calc requests: short task labels + the companion-file text format
+   (crew header F## - NAME:, subs alphabetical, • job - TASK (sched M/D)) */
+function cffShortTask(t){
+  const v=String(t||'').trim().toUpperCase();
+  const map={'FORM SURVEY':'FORM','GRADE STAKING':'GRADE','RE-GRADE STAKE':'REGRADE',
+    'FINAL SVY SWALE':'FINALS','SIGNED SLAB SVY':'SLAB','ENV W\\ELEV STK':'ENV'};
+  return map[v] || v.split(/\s+/)[0] || '';
+}
+function buildCffText(items){
+  if(!items.length) return '';
+  const byCrew=new Map();
+  for(const it of items){
+    if(!byCrew.has(it.code)) byCrew.set(it.code,{name:it.name,subs:new Map()});
+    const c=byCrew.get(it.code);
+    const sub=(it.sub||'(no subdivision)').toUpperCase();
+    if(!c.subs.has(sub)) c.subs.set(sub,[]);
+    c.subs.get(sub).push(`    • ${it.job} - ${it.task}${it.sched?` (sched ${it.sched})`:''}`);
+  }
+  const parts=[];
+  for(const code of [...byCrew.keys()].sort((a,b)=>a.localeCompare(b,undefined,{numeric:true}))){
+    const c=byCrew.get(code);
+    const lines=[`${code} - ${String(c.name||'').toUpperCase()}:`];
+    for(const sub of [...c.subs.keys()].sort()) lines.push(`- ${sub}`, ...c.subs.get(sub));
+    parts.push(lines.join('\n'));
+  }
+  return parts.join('\n\n');
+}
+function openCffModal(res){
+  const root=document.getElementById('modalRoot');
+  const crews=new Set(res.cffReq.map(x=>x.code)).size;
+  root.innerHTML=`<div class="backdrop"><div class="modal" style="max-width:560px"><div class="mh"><h3>CFF calc requests</h3>
+    <div class="muted" style="font-size:12.5px;margin-top:4px">${res.cffReq.length} assignment${res.cffReq.length===1?'':'s'} across ${crews} crew${crews===1?'':'s'}
+    &mdash; these rows were dropped from the Sage import; send this to the calc department.</div></div>
+  <div class="mb"><pre id="cffPre" style="margin:0;background:#f8fafc;border:1px solid var(--line);border-radius:8px;padding:12px;font-size:12.5px;line-height:1.55;max-height:48vh;overflow:auto;white-space:pre-wrap">${esc(res.cffText)}</pre></div>
+  <div class="mf"><button id="cffDl" style="margin-right:auto">Download .txt</button>
+    <button id="cffClose">Close</button><button class="primary" id="cffCopy">Copy</button></div></div></div>`;
+  document.getElementById('cffClose').onclick=()=>root.innerHTML='';
+  document.getElementById('cffDl').onclick=()=>download(`CFF Requests ${REGION} ${todayStamp()}.txt`, res.cffText, 'text/plain');
+  document.getElementById('cffCopy').onclick=async()=>{
+    try{ await navigator.clipboard.writeText(res.cffText); showToast('Copied'); }
+    catch(e){
+      const ta=document.createElement('textarea'); ta.value=res.cffText; document.body.appendChild(ta);
+      ta.select(); try{ document.execCommand('copy'); showToast('Copied'); }catch(e2){ showToast('Copy failed — select the text manually'); }
+      ta.remove();
+    }
+  };
+}
+
 function reverseConvert(f03Text, f01Text){
   if(!f01Text) throw new Error('Load the original Sage export (file01) first.');
   const f1 = parseCSV(f01Text).filter(r=>r.some(c=>String(c).trim()!==''));  // handles quoted or padded
@@ -932,6 +1033,7 @@ function reverseConvert(f03Text, f01Text){
   const ix = n=>f1cols.findIndex(c=>norm(c)===norm(n));
   const iSvc=ix('Svc Job Num'), iSid=ix('Servicer Id'), iStat=ix('Status Code');
   if(iSvc<0||iSid<0||iStat<0) throw new Error('file01 is missing Svc Job Num / Servicer Id / Status Code columns.');
+  const iMj=ix('Master Job'), iSb=ix('Subdiv Name'), iTk=ix('Description Of Problem'), iSd=ix('Schedule_Date');
 
   // file03 -> assignment map by Svc Job Num
   const f3rows=parseCSV(f03Text).filter(r=>r.some(c=>String(c).trim()!==''));
@@ -956,6 +1058,7 @@ function reverseConvert(f03Text, f01Text){
   const isDateName = n => norm(n)==='received date' || norm(n)==='schedule_date';
   const outRows=[ OUT_COLS.slice() ];  // canonical header
   const st={kept:0, out2if:0, feKept:0, fvKept:0, dropCFF:0, dropUnassigned:0};
+  const cffReq=[]; // CFF rows with a routed crew that has a Field # -> calc requests
   const missingCode=new Map();   // "First Last" -> count (crew found, no code)
   const unknownCrew=new Map();   // "First Last" -> count (not in library)
   const f01svc=new Set();
@@ -964,7 +1067,22 @@ function reverseConvert(f03Text, f01Text){
     const status=String(cells[iStat]||'').trim();
     const svc=String(cells[iSvc]||'').trim();
     if(svc) f01svc.add(svc);
-    if(status==='CFF'){ st.dropCFF++; continue; }
+    if(status==='CFF'){
+      // dropped from file04 (calc owns these) — but a routed CFF with a coded
+      // crew becomes a calc request in the companion window
+      st.dropCFF++;
+      const a3=assign.get(svc);
+      if(a3){ const cw=crewByName(a3.first,a3.last);
+        if(cw && cw.code){
+          const mj=iMj>=0?String(cells[iMj]||'').trim().replace(/^0+/,''):'';
+          const sk=iSd>=0?parseDateKey(cells[iSd]):null;
+          cffReq.push({code:cw.code, name:cw.name,
+            sub:iSb>=0?String(cells[iSb]||'').trim():'',
+            job:mj||svc, task:cffShortTask(iTk>=0?cells[iTk]:''),
+            sched:sk!=null?`${Math.floor(sk/100)%100}/${sk%100}`:''});
+        } }
+      continue;
+    }
     if(!assign.has(svc)){ st.dropUnassigned++; continue; }
     const a=assign.get(svc);
     const crew=crewByName(a.first,a.last);
@@ -990,7 +1108,8 @@ function reverseConvert(f03Text, f01Text){
   const routedMissing=[...assign.keys()].filter(s=>!f01svc.has(s)).length;
   const q = s => '"'+String(s==null?'':s).replace(/"/g,'""')+'"';
   const text = outRows.map(r=>r.map(q).join(',')).join('\n')+'\n';
-  return {text, outName:`Sage Import ${REGION} ${todayStamp()}.csv`, st, missingCode, unknownCrew, routedTotal, routedMissing};
+  return {text, outName:`Sage Import ${REGION} ${todayStamp()}.csv`, st, missingCode, unknownCrew, routedTotal, routedMissing,
+    cffReq, cffText:buildCffText(cffReq)};
 }
 function toMMDDYY(s){
   s=String(s==null?'':s).trim();
@@ -1028,8 +1147,18 @@ function runReverse(){
   if(res.missingCode.size) probs.push(`<div class="unmatched"><span class="badge warn">Missing Servicer Id code</span>
     <div style="margin-top:6px">These crews have no code set (Crews tab), so Servicer Id was left unchanged:</div>
     <div style="margin-top:6px">${[...res.missingCode].map(([k,n])=>`<span class="chip">${esc(k)} &times;${n}</span>`).join('')}</div></div>`);
+  if(res.cffReq.length){
+    const crews=new Set(res.cffReq.map(x=>x.code)).size;
+    probs.push(`<div class="note" style="display:flex;align-items:center;gap:10px"><span style="flex:1"><b>${res.cffReq.length}</b> routed CFF job${res.cffReq.length===1?'':'s'}
+      across <b>${crews}</b> crew${crews===1?'':'s'} &mdash; dropped from the Sage import; send the calc request instead.</span>
+      <button class="small primary" id="cffOpenBtn">CFF calc requests&hellip;</button></div>`);
+  } else if(s.dropCFF>0){
+    probs.push(`<div class="note">${s.dropCFF} CFF row(s) dropped &mdash; none were routed to a coded crew, so there&rsquo;s nothing to request.</div>`);
+  }
   document.getElementById('warn4Box').innerHTML = probs.length ? probs.join('')
     : `<div class="note">Every kept job got a crew Servicer Id. Ready to import into Sage.</div>`;
+  const cffBtn=document.getElementById('cffOpenBtn');
+  if(cffBtn) cffBtn.onclick=()=>openCffModal(res);
   document.getElementById('out4Name').textContent='will save as: '+res.outName;
 }
 function download4(){
@@ -2385,7 +2514,7 @@ window.addEventListener('error',ev=>{
 });
 
 // init
-const APP_VERSION='v51 · 2026-08-28';
+const APP_VERSION='v52 · 2026-08-28';
 document.getElementById('appVer').textContent=APP_VERSION+' · '+REGION;
 // region switcher: each region is its own workspace; a click stores the choice
 // and reloads so the whole app boots into that region's storage
