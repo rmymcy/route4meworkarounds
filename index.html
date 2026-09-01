@@ -683,7 +683,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
   *{box-sizing:border-box}
   body{margin:0;font:14px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
     background:var(--bg);color:var(--ink)}
-  header{background:var(--panel);border-bottom:1px solid var(--line);padding:14px 20px;
+  header{background:var(--panel);border-bottom:1px solid var(--line);padding:12px 24px;
     display:flex;align-items:center;gap:14px;position:sticky;top:0;z-index:20}
   header h1{font-size:16px;margin:0;font-weight:700;letter-spacing:.2px}
   header .sub{color:var(--muted);font-size:12px}
@@ -695,8 +695,8 @@ svg.leaflet-image-layer.leaflet-interactive path {
   .region{padding:5px 12px;border-radius:7px;cursor:pointer;font-weight:700;font-size:12px;color:var(--muted);letter-spacing:.04em}
   .region:hover{color:var(--ink)}
   .region.active{background:var(--panel);box-shadow:var(--shadow)}
-  main{max-width:1080px;margin:0 auto;padding:22px 20px 80px}
-  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow);padding:20px;margin-bottom:18px}
+  main{max-width:1680px;margin:0 auto;padding:22px 28px 80px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow);padding:18px 22px;margin-bottom:16px}
   .card h2{margin:0 0 4px;font-size:15px}
   .card p.help{margin:0 0 16px;color:var(--muted);font-size:13px}
   button{font:inherit;cursor:pointer;border-radius:8px;border:1px solid var(--line);background:#fff;padding:8px 14px;font-weight:600;color:var(--ink)}
@@ -718,7 +718,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
   th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}
   th{font-size:11px;text-transform:uppercase;letter-spacing:.4px;color:var(--muted);position:sticky;top:0;background:var(--panel);z-index:1}
   tr:hover td{background:#fafbfd}
-  .tablewrap{max-height:460px;overflow:auto;border:1px solid var(--line);border-radius:10px}
+  .tablewrap{max-height:640px;overflow:auto;border:1px solid var(--line);border-radius:10px}
   .chip{display:inline-block;background:var(--chip);border-radius:999px;padding:2px 9px;font-size:11px;margin:2px 3px 2px 0;color:#475467}
   .chip .x{cursor:pointer;color:#98a2b3;margin-left:4px;font-weight:700}
   .chip .x:hover{color:var(--err)}
@@ -826,7 +826,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
     align-items:center;justify-content:center;cursor:pointer;font-size:13px;padding:0;color:#475467}
   .icon-btn:hover{border-color:var(--brand);color:var(--brand);background:#f8fafc}
   .icon-btn.danger:hover{border-color:var(--err);color:var(--err);background:var(--err-bg)}
-  #subsMapWrap{height:540px;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:#eaeaed}
+  #subsMapWrap{height:66vh;min-height:480px;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:#eaeaed}
   /* ---- sub review cards (fuzzy import resolution) ---- */
   .review-card{background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--warn);border-radius:8px;
     padding:12px;margin-bottom:10px;font-size:13px}
@@ -923,7 +923,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
         <button class="small" id="colsBtn" title="choose which columns go to Route4Me (core: Alias, Lat, Long, Svc Job Num)">Columns&hellip;</button>
         <button class="primary" id="genBtn">Build Route4Me file &rarr;</button>
       </div>
-      <div class="tablewrap" style="max-height:52vh">
+      <div class="tablewrap" style="max-height:62vh">
         <table id="jobsTable" title="Click a header to sort · Shift+click selects a range · Ctrl/Cmd+click toggles">
           <thead><tr id="jobsHead"></tr></thead>
           <tbody id="jobsBody"></tbody>
@@ -992,7 +992,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
       <div id="kmzStatus" class="note hide" style="margin-bottom:12px"></div>
       <div id="subsListWrap">
         <div class="subs-grid-head" id="subsGridHead"></div>
-        <div id="subsList" style="max-height:56vh;overflow-y:auto"></div>
+        <div id="subsList" style="max-height:64vh;overflow-y:auto"></div>
       </div>
       <div id="subsMapWrap" class="hide"></div>
       <p class="muted" id="subCount" style="margin:10px 2px 0"></p>
@@ -3269,7 +3269,7 @@ window.addEventListener('error',ev=>{
 });
 
 // init
-const APP_VERSION='v60 · 2026-08-28';
+const APP_VERSION='v61 · 2026-08-28';
 document.getElementById('appVer').textContent=APP_VERSION+' · '+REGION;
 // region switcher: each region is its own workspace; a click stores the choice
 // and reloads so the whole app boots into that region's storage
