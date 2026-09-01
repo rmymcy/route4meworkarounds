@@ -527,65 +527,108 @@ function openColsModal(){
   };
 }
 
-/* priority matrix: task type × how close Sage's Schedule_Date is to the route
-   day ("Schedule For" date, or today if unset). A filled cell writes that value
-   into a tool-built Priority column; blank cells fall back to Sage's Priority.
-   Stored per region. No filled cells at all = no Priority column. */
-const K_PRIOMX=RK+'priomatrix_v1';
-const PRIO_BUCKETS=['Overdue','Due that day','Due next day','2+ days out'];
-function loadPrioMx(){ const m=load(K_PRIOMX,{}); return (m&&typeof m==='object'&&!Array.isArray(m))?m:{}; }
-function prioMxActive(mx){ return Object.values(mx).some(r=>(r.v||[]).some(x=>x!==''&&x!=null)); }
+/* ==== PRIORITY MATRIX (two clocks) ====
+   Each task family carries values on two scales — how close Schedule_Date is
+   to the route day (Due clock) and how old the job is (Received clock) — and
+   a job's priority is the HOTTEST (lowest) applicable value. Blank cell = that
+   bucket contributes nothing; a task in no family keeps Sage's Priority.
+   Sage Priority "R" (rush) = 1, over everything. Stored per region. */
+const K_PRIOMX=RK+'priomatrix_v2';
+const PRIO_DUE=['Late','Due that day','1 day before','2+ before'];
+const PRIO_RECV=['Received day','+1 day','+2 days','+3 or more'];
+const PRIO_DEFAULT={
+  stakeout:{label:'Stake outs',tasks:['ENV W\\ELEV STK','GRADE STAKING','RE-GRADE STAKE'],due:['10','15','',''],recv:['','','','']},
+  form:{label:'Forms',tasks:['FORM SURVEY'],due:['10','10','15','40'],recv:['','','','']},
+  slab:{label:'Slabs',tasks:['SIGNED SLAB SVY'],due:['20','15','15',''],recv:['50','50','40','30']},
+  final:{label:'Finals',tasks:['FINAL SVY SWALE'],due:['20','15','30',''],recv:['60','60','60','50']}
+};
+function loadPrioMx(){
+  const m=load(K_PRIOMX,null);
+  const mx=(m&&typeof m==='object'&&m.fam)?m:{fam:JSON.parse(JSON.stringify(PRIO_DEFAULT))};
+  // letter codes arriving in Sage's Priority column (R = rush); more can be added
+  if(!mx.codes||typeof mx.codes!=='object') mx.codes={R:'1'};
+  return mx;
+}
+function prioMxActive(mx){ return Object.values(mx.fam||{}).some(f=>[...(f.due||[]),...(f.recv||[])].some(x=>x!==''&&x!=null)); }
 function openPrioModal(){
   const mx=loadPrioMx();
-  // tasks = saved rows + every task type in the loaded Sage export
-  const tasks=new Map(Object.entries(mx).map(([k,r])=>[k,{label:r.label||k,v:(r.v||['','','','']).map(x=>x==null?'':String(x))}]));
-  if(jobsHeader){
-    const iT=findCol(jobsHeader,'Description Of Problem');
-    if(iT>=0) for(const r of jobsRows){
-      const t=String(r.cells[iT]||'').trim();
-      if(t && !tasks.has(norm(t))) tasks.set(norm(t),{label:t,v:['','','','']});
-    }
-  }
+  const fam=mx.fam;
   const root=document.getElementById('modalRoot');
+  const numRow=(k,kind,labels,vals)=>`
+    <div style="display:grid;grid-template-columns:92px repeat(4,1fr);gap:5px;align-items:center;margin-top:4px">
+      <div class="muted" style="font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;font-weight:600">${kind==='due'?'Due clock':'Received'}</div>
+      ${vals.map((v,i)=>`<input type="number" data-pm="${esc(k)}|${kind}|${i}" value="${esc(v==null?'':v)}" placeholder="—" title="${labels[i]}" style="padding:5px 4px;font-size:12px;text-align:center">`).join('')}
+    </div>`;
   const render=()=>{
-    const rows=[...tasks.entries()].sort((a,b)=>a[1].label.localeCompare(b[1].label));
-    root.innerHTML=`<div class="backdrop"><div class="modal" style="max-width:640px"><div class="mh"><h3>Priority matrix</h3>
-      <div class="muted" style="font-size:12.5px;margin-top:4px">Priority by task type and how the job&rsquo;s <b>Schedule_Date</b> compares
-      to the route day (the &ldquo;Schedule for&rdquo; date). Filled cells write a <b>Priority</b> column into the Route4Me file;
-      blank cells keep Sage&rsquo;s own Priority for that job. Leave everything blank to omit the column.</div></div>
+    const keys=Object.keys(fam);
+    root.innerHTML=`<div class="backdrop"><div class="modal" style="max-width:680px"><div class="mh"><h3>Priority matrix</h3>
+      <div class="muted" style="font-size:12.5px;margin-top:4px">Lower = hotter. A job takes the <b>hottest</b> value its dates hit on either clock.
+      Blank cell = skip that bucket; a task in no family keeps Sage&rsquo;s Priority untouched.
+      Sage Priority <b>R</b> (rush) always becomes <b>1</b>.</div></div>
     <div class="mb">
-      <div style="display:grid;grid-template-columns:1.6fr repeat(4,1fr) 30px;gap:6px;align-items:center;font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;font-weight:600;margin-bottom:6px">
-        <div>Task</div>${PRIO_BUCKETS.map(b=>`<div style="text-align:center">${b}</div>`).join('')}<div></div></div>
-      ${rows.map(([k,r])=>`<div style="display:grid;grid-template-columns:1.6fr repeat(4,1fr) 30px;gap:6px;align-items:center;margin-bottom:5px" data-pmrow="${esc(k)}">
-        <div style="font-size:12px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.label)}">${esc(r.label)}</div>
-        ${r.v.map((v,i)=>`<input type="number" data-pmv="${i}" value="${esc(v)}" style="padding:5px 6px;font-size:12.5px;text-align:center">`).join('')}
-        <button class="icon-btn danger" data-pmdel="${esc(k)}" title="remove row">&times;</button>
-      </div>`).join('')||'<div class="muted" style="padding:10px 0">No task types yet — load a Sage export or add one below.</div>'}
-      <div class="row" style="margin-top:12px">
-        <input type="text" id="pmNew" placeholder="Add task type (e.g. FORM SURVEY)" style="flex:1">
-        <button class="primary small" id="pmAdd">Add</button>
+      <div style="display:grid;grid-template-columns:92px repeat(4,1fr);gap:5px;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;font-weight:600">
+        <div></div>${PRIO_DUE.map((b,i)=>`<div style="text-align:center">${b}<br><span style="font-weight:400">${PRIO_RECV[i]}</span></div>`).join('')}
+      </div>
+      <div class="muted" style="font-size:10.5px;margin:2px 0 8px">column headers: top = Due clock bucket &middot; bottom = Received clock bucket</div>
+      ${keys.map(k=>{const f=fam[k];return `
+      <div style="border:1px solid var(--line);border-radius:8px;padding:9px 10px;margin-bottom:8px" data-pmfam="${esc(k)}">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <b style="font-size:13px">${esc(f.label)}</b>
+          <span class="alias-wrap" style="flex:1">
+            ${(f.tasks||[]).map((t,ti)=>`<span class="alias-chip"><span>${esc(t)}</span><button data-pmtdel="${esc(k)}" data-ti="${ti}" title="unmap task">&times;</button></span>`).join('')}
+            <input type="text" data-pmtadd="${esc(k)}" placeholder="+ map a task&hellip;" style="border:1px dashed #c3ccd8;border-radius:10px;padding:2px 8px;font-size:10.5px;width:130px">
+          </span>
+          <button class="icon-btn danger" data-pmfdel="${esc(k)}" title="remove family">&times;</button>
+        </div>
+        ${numRow(k,'due',PRIO_DUE,f.due||['','','',''])}
+        ${numRow(k,'recv',PRIO_RECV,f.recv||['','','',''])}
+      </div>`;}).join('')}
+      <div class="row" style="margin-top:10px">
+        <input type="text" id="pmNewFam" placeholder="Add family (e.g. Plats)" style="flex:1">
+        <button class="primary small" id="pmFamAdd">Add</button>
+      </div>
+      <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line)">
+        <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;font-weight:600;margin-bottom:6px">Sage letter codes (Priority column)</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+          ${Object.entries(mx.codes).map(([c,v])=>`<span class="alias-chip" style="font-size:12px;padding:4px 6px 4px 10px"><b>${esc(c)}</b>&nbsp;&rarr;&nbsp;${esc(v)}<button data-pmcdel="${esc(c)}" title="remove code">&times;</button></span>`).join('')}
+          <input type="text" id="pmCodeK" placeholder="code" maxlength="3" style="width:56px;padding:4px 8px;font-size:12px">
+          <input type="number" id="pmCodeV" placeholder="priority" style="width:80px;padding:4px 8px;font-size:12px">
+          <button class="small" id="pmCodeAdd">Add code</button>
+        </div>
+        <div class="muted" style="font-size:11px;margin-top:5px">A job whose Sage Priority matches a code gets that priority, over both clocks.</div>
       </div>
     </div>
-    <div class="mf"><button id="pmCancel">Cancel</button><button class="primary" id="pmSave">Save</button></div></div></div>`;
-    const collect=()=>{ root.querySelectorAll('[data-pmrow]').forEach(el=>{
-      const t=tasks.get(el.dataset.pmrow); if(t) t.v=[...el.querySelectorAll('input[data-pmv]')].map(x=>x.value.trim()); }); };
+    <div class="mf"><button class="small" id="pmReset" style="margin-right:auto">Reset to standard</button>
+      <button id="pmCancel">Cancel</button><button class="primary" id="pmSave">Save</button></div></div></div>`;
+    const collect=()=>{ root.querySelectorAll('input[data-pm]').forEach(inp=>{
+      const [k,kind,i]=inp.dataset.pm.split('|');
+      if(fam[k]){ (fam[k][kind]=fam[k][kind]||['','','',''])[+i]=inp.value.trim(); } }); };
     document.getElementById('pmCancel').onclick=()=>root.innerHTML='';
-    document.getElementById('pmAdd').onclick=()=>{
-      const v=document.getElementById('pmNew').value.trim(); if(!v) return;
-      if(tasks.has(norm(v))){ showToast('Already listed'); return; }
-      collect(); tasks.set(norm(v),{label:v,v:['','','','']}); render();
+    document.getElementById('pmReset').onclick=()=>{ if(confirm('Reset the matrix to the standard AllPoints setup?')){
+      for(const k of Object.keys(fam)) delete fam[k];
+      Object.assign(fam,JSON.parse(JSON.stringify(PRIO_DEFAULT))); render(); } };
+    document.getElementById('pmFamAdd').onclick=()=>{
+      const v=document.getElementById('pmNewFam').value.trim(); if(!v) return;
+      const k=norm(v).replace(/\s+/g,'_'); if(fam[k]){ showToast('Already exists'); return; }
+      collect(); fam[k]={label:v,tasks:[],due:['','','',''],recv:['','','','']}; render();
     };
-    document.getElementById('pmNew').addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); document.getElementById('pmAdd').click(); } });
-    root.querySelectorAll('[data-pmdel]').forEach(b=>b.onclick=()=>{ collect(); tasks.delete(b.dataset.pmdel); render(); });
-    document.getElementById('pmSave').onclick=()=>{
-      collect();
-      const outMx={};
-      for(const [k,r] of tasks) outMx[k]={label:r.label,v:r.v};
-      save(K_PRIOMX,outMx);
-      root.innerHTML='';
-      const active=prioMxActive(outMx);
-      showToast(active?'Priority matrix saved — click Build':'Saved (all blank — no Priority column). Click Build');
+    document.getElementById('pmNewFam').addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); document.getElementById('pmFamAdd').click(); } });
+    root.querySelectorAll('[data-pmfdel]').forEach(b=>b.onclick=()=>{ if(confirm(`Remove "${fam[b.dataset.pmfdel].label}"? Its tasks fall back to Sage's Priority.`)){ collect(); delete fam[b.dataset.pmfdel]; render(); } });
+    root.querySelectorAll('[data-pmtdel]').forEach(b=>b.onclick=()=>{ collect(); fam[b.dataset.pmtdel].tasks.splice(+b.dataset.ti,1); render(); });
+    root.querySelectorAll('[data-pmcdel]').forEach(b=>b.onclick=()=>{ collect(); delete mx.codes[b.dataset.pmcdel]; render(); });
+    document.getElementById('pmCodeAdd').onclick=()=>{
+      const c=document.getElementById('pmCodeK').value.trim().toUpperCase();
+      const v=document.getElementById('pmCodeV').value.trim();
+      if(!c||!v||!isFinite(+v)){ showToast('Enter a code and a numeric priority'); return; }
+      collect(); mx.codes[c]=v; render();
     };
+    root.querySelectorAll('[data-pmtadd]').forEach(inp=>inp.addEventListener('keydown',e=>{
+      if(e.key!=='Enter') return; e.preventDefault();
+      const v=inp.value.trim(); if(!v) return;
+      for(const f of Object.values(fam)) if((f.tasks||[]).some(t=>norm(t)===norm(v))){ showToast('That task is already mapped'); return; }
+      collect(); fam[inp.dataset.pmtadd].tasks.push(v); render();
+    }));
+    document.getElementById('pmSave').onclick=()=>{ collect(); save(K_PRIOMX,{fam,codes:mx.codes}); root.innerHTML=''; showToast('Priority matrix saved — click Build'); };
   };
   render();
 }
@@ -622,22 +665,36 @@ function buildFile02(rows){
   const iTask=findCol(header,'Description Of Problem');
   const aliasFor=(cells,subName)=>[iTask>=0?String(cells[iTask]||'').trim():'',
     String(subName||cells[iSub]||'').trim()].filter(Boolean).join(' - ');
-  // priority matrix: task × (Schedule_Date vs route day)
+  // priority matrix (two clocks): hottest of Due-clock and Received-clock values
   const PRIOMX=loadPrioMx();
   const prioOn=prioMxActive(PRIOMX) && iTask>=0;
-  const iPrio01=findCol(header,'Priority'), iSched01=findCol(header,'Schedule_Date');
+  const iPrio01=findCol(header,'Priority'), iSched01=findCol(header,'Schedule_Date'), iRecv01=findCol(header,'Received Date');
   const routeDay = sfEl&&sfEl.value
     ? new Date(+sfEl.value.slice(0,4), +sfEl.value.slice(5,7)-1, +sfEl.value.slice(8,10))
     : (d=>new Date(d.getFullYear(),d.getMonth(),d.getDate()))(new Date());
-  let prioApplied=0;
-  const prioFor=cells=>{ // matrix value, or null -> keep Sage's Priority
-    const row=PRIOMX[norm(cells[iTask])]; if(!row) return null;
-    const k=iSched01>=0?parseDateKey(cells[iSched01]):null;
-    if(k==null) return null;
-    const diff=Math.round((new Date(Math.floor(k/10000),Math.floor(k/100)%100-1,k%100)-routeDay)/86400000);
-    const v=(row.v||[])[diff<0?0:diff===0?1:diff===1?2:3];
-    return v===''||v==null?null:String(v);
+  const famByTask={};
+  for(const f of Object.values(PRIOMX.fam||{})) for(const t of (f.tasks||[])) famByTask[norm(t)]=f;
+  const keyDate=k=>new Date(Math.floor(k/10000),Math.floor(k/100)%100-1,k%100);
+  const dayDiff=(a,b)=>Math.round((a-b)/86400000);
+  let prioApplied=0, rushN=0;
+  const codes=PRIOMX.codes||{R:'1'};
+  const prioFor=cells=>{ // {v, rush} or null -> keep Sage's Priority
+    const pc=iPrio01>=0?String(cells[iPrio01]||'').trim().toUpperCase():'';
+    if(pc && codes[pc]!=null){ rushN++; return {v:String(codes[pc]),rush:true}; }
+    const f=famByTask[norm(cells[iTask])]; if(!f) return null;
+    const cand=[];
+    if(iSched01>=0){ const k=parseDateKey(cells[iSched01]);
+      if(k!=null){ const d=dayDiff(keyDate(k),routeDay);
+        const v=(f.due||[])[d<0?0:d===0?1:d===1?2:3]; if(v!==''&&v!=null&&isFinite(+v)) cand.push(+v); } }
+    if(iRecv01>=0){ const k=parseDateKey(cells[iRecv01]);
+      if(k!=null){ const age=dayDiff(routeDay,keyDate(k));
+        const v=(f.recv||[])[age<=0?0:age===1?1:age===2?2:3]; if(v!==''&&v!=null&&isFinite(+v)) cand.push(+v); } }
+    return cand.length?{v:String(Math.min(...cand)),rush:false}:null;
   };
+  // marker color: heat fade by matrix tier (red -> white as priority cools)
+  const prioColor=v=>{ const n=+v; if(!isFinite(n)) return '';
+    return n<=1?'#FF0000' : n<=10?'#FF5A5A' : n<=15?'#FF7A00' : n<=20?'#FFB055'
+      : n<=30?'#FFE000' : n<=40?'#FFEB80' : n<=60?'#FFF5C2' : '#FFFFFF'; };
   const plan=[], placed=new Set();
   const addOrig=i=>{ if(i>=0 && !placed.has(i) && !skip.has(i)){ plan.push({k:'orig',i}); placed.add(i); } };
   addOrig(iAddr);
@@ -646,14 +703,15 @@ function buildFile02(rows){
   plan.push({k:'lng'});
   addOrig(iSvc);
   if(schedFor) plan.push({k:'sched'});
-  if(prioOn) plan.push({k:'prio'});
+  if(prioOn){ plan.push({k:'prio'}); plan.push({k:'color'}); }
   const extras=loadFile02Cols();
   for(let c=0;c<header.length;c++) if(extras.has(norm(header[c]))) addOrig(c); // chosen extras, original order
-  function reshape(cells, latVal, lngVal, schedVal, aliasVal, prioVal){
+  function reshape(cells, latVal, lngVal, schedVal, aliasVal, prioVal, colorVal){
     return plan.map(s=> s.k==='orig' ? (cells[s.i]==null?'':cells[s.i])
-      : s.k==='lat' ? latVal : s.k==='lng' ? lngVal : s.k==='alias' ? aliasVal : s.k==='prio' ? prioVal : schedVal);
+      : s.k==='lat' ? latVal : s.k==='lng' ? lngVal : s.k==='alias' ? aliasVal
+      : s.k==='prio' ? prioVal : s.k==='color' ? colorVal : schedVal);
   }
-  out.push(reshape(header, LAT_H, LNG_H, 'Schedule For', 'Alias', 'Priority')); // header row (orig specs yield padded header names)
+  out.push(reshape(header, LAT_H, LNG_H, 'Schedule For', 'Alias', 'Priority', 'Color')); // header row (orig specs yield padded header names)
 
   const unmatched=new Map(); // erpName -> {count}
   const noCoords=new Map();  // matched sub name -> count (sub exists but has no lat/long yet)
@@ -674,13 +732,13 @@ function buildFile02(rows){
       const rec=unmatched.get(key)||{count:0};
       rec.count++; unmatched.set(key,rec);
     }
-    let prio='';
+    let prio='', color='';
     if(prioOn){
       const mv=prioFor(cells);
-      if(mv!=null){ prio=mv; prioApplied++; }
+      if(mv!=null){ prio=mv.v; color=prioColor(mv.v); prioApplied++; }
       else prio=iPrio01>=0?String(cells[iPrio01]||'').trim():'';
     }
-    out.push(reshape(cells, lat, lng, schedFor, aliasFor(cells, m.sub?m.sub.name:''), prio));
+    out.push(reshape(cells, lat, lng, schedFor, aliasFor(cells, m.sub?m.sub.name:''), prio, color));
   }
   // same task in the same sub -> identical aliases; number them so every stop
   // in Route4Me is distinguishable: "FORM SURVEY - Westview (1)", "(2)", ...
@@ -693,7 +751,7 @@ function buildFile02(rows){
   }
 
   const outName=`Route4Me Upload ${REGION} ${todayStamp()}.csv`;
-  return {rows:out, outName, schedFor, prioOn, prioApplied, unmatched, noCoords, matched, jobs};
+  return {rows:out, outName, schedFor, prioOn, prioApplied, rushN, unmatched, noCoords, matched, jobs};
 }
 function isActive(cw){ return cw.active!==false; } // default on unless explicitly false
 function todayStamp(){ const d=new Date(); const p=n=>String(n).padStart(2,'0'); return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`; }
@@ -841,7 +899,7 @@ function renderResult(res){
       <div style="margin-top:8px">${names}</div></div>`);
   }
   if(res.schedFor) blocks.push(`<div class="note">Schedule For <b>${esc(res.schedFor)}</b> on every job &mdash; Route4Me will auto-schedule the orders for that day. (Sage&rsquo;s Schedule_Date is untouched.)</div>`);
-  if(res.prioOn) blocks.push(`<div class="note">Priority matrix: <b>${res.prioApplied}</b> of ${res.jobs} job(s) got a matrix priority; the rest keep Sage&rsquo;s Priority.</div>`);
+  if(res.prioOn) blocks.push(`<div class="note">Priority matrix: <b>${res.prioApplied}</b> of ${res.jobs} job(s) prioritized${res.rushN?` &mdash; <b>${res.rushN} letter-coded (R&hellip;)</b>`:''}; the rest keep Sage&rsquo;s Priority.</div>`);
   warn.innerHTML = blocks.length ? blocks.join('') : `<div class="note">All subdivisions matched. Ready to upload to Route4Me.</div>`;
   document.getElementById('outName').textContent='will save as: '+res.outName;
 }
@@ -2327,7 +2385,7 @@ window.addEventListener('error',ev=>{
 });
 
 // init
-const APP_VERSION='v50 · 2026-08-27';
+const APP_VERSION='v51 · 2026-08-28';
 document.getElementById('appVer').textContent=APP_VERSION+' · '+REGION;
 // region switcher: each region is its own workspace; a click stores the choice
 // and reloads so the whole app boots into that region's storage
