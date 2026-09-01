@@ -204,6 +204,8 @@
         <button class="small danger" id="removeSelBtn">Remove selected (0)</button>
         <button class="small" id="restoreBtn">Restore removed</button>
         <span class="muted grow" id="trimCount"></span>
+        <label class="muted" style="font-size:12px;display:flex;align-items:center;gap:6px" title="Adds a Schedule_For column with this date on every job — Route4Me auto-schedules the orders for that day. Clear it to leave the column out. Sage's own Schedule_Date is untouched.">
+          Schedule for <input type="date" id="schedFor" style="padding:5px 8px;font:inherit;font-size:12.5px;border:1px solid var(--line);border-radius:8px"></label>
         <button class="small" id="colsBtn" title="choose which columns go to Route4Me (core: Address 1, Lat, Long, Svc Job Num)">Columns&hellip;</button>
         <button class="primary" id="genBtn">Build Route4Me file &rarr;</button>
       </div>
@@ -543,19 +545,28 @@ function buildFile02(rows){
   // be toggled on via "Columns…" (stored per region).
   const iSvc=findCol(header,'Svc Job Num');
   const skip=new Set([findCol(header,LAT_H),findCol(header,LNG_H),findCol(header,DEPOT_H)].filter(x=>x>=0));
+  // Schedule_For: one uniform date on every job so Route4Me auto-schedules the
+  // orders for that day (its own column — Sage's Schedule_Date is untouched)
+  const sfEl=document.getElementById('schedFor');
+  let schedFor=null;
+  if(sfEl && sfEl.value){
+    const m=sfEl.value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if(m) schedFor=`${+m[2]}/${+m[3]}/${m[1]}`;
+  }
   const plan=[], placed=new Set();
   const addOrig=i=>{ if(i>=0 && !placed.has(i) && !skip.has(i)){ plan.push({k:'orig',i}); placed.add(i); } };
   addOrig(iAddr);
   plan.push({k:'lat'});
   plan.push({k:'lng'});
   addOrig(iSvc);
+  if(schedFor) plan.push({k:'sched'});
   const extras=loadFile02Cols();
   for(let c=0;c<header.length;c++) if(extras.has(norm(header[c]))) addOrig(c); // chosen extras, original order
-  function reshape(cells, latVal, lngVal){
+  function reshape(cells, latVal, lngVal, schedVal){
     return plan.map(s=> s.k==='orig' ? (cells[s.i]==null?'':cells[s.i])
-      : s.k==='lat' ? latVal : lngVal);
+      : s.k==='lat' ? latVal : s.k==='lng' ? lngVal : schedVal);
   }
-  out.push(reshape(header, LAT_H, LNG_H)); // header row (orig specs yield padded header names)
+  out.push(reshape(header, LAT_H, LNG_H, 'Schedule_For')); // header row (orig specs yield padded header names)
 
   const unmatched=new Map(); // erpName -> {count}
   const noCoords=new Map();  // matched sub name -> count (sub exists but has no lat/long yet)
@@ -576,11 +587,11 @@ function buildFile02(rows){
       const rec=unmatched.get(key)||{count:0};
       rec.count++; unmatched.set(key,rec);
     }
-    out.push(reshape(cells, lat, lng));
+    out.push(reshape(cells, lat, lng, schedFor));
   }
 
   const outName=`Route4Me Upload ${REGION} ${todayStamp()}.csv`;
-  return {rows:out, outName, unmatched, noCoords, matched, jobs};
+  return {rows:out, outName, schedFor, unmatched, noCoords, matched, jobs};
 }
 function isActive(cw){ return cw.active!==false; } // default on unless explicitly false
 function todayStamp(){ const d=new Date(); const p=n=>String(n).padStart(2,'0'); return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`; }
@@ -607,6 +618,10 @@ function loadFile01ForReview(text,name){
   jobsRows=rows.slice(1).map((cells,i)=>({cells,id:i,removed:false}));
   jobsSel=new Set(); jobsAnchor=null; jobsSort={i:null,dir:1};
   ONE_TIME_SUB.clear();   // one-time sub matches are per-import-run
+  // fresh default per import: tomorrow (Route4Me auto-schedules orders for this day)
+  const sfEl=document.getElementById('schedFor');
+  if(sfEl){ const d=new Date(Date.now()+86400000), p=n=>String(n).padStart(2,'0');
+    sfEl.value=`${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`; }
   // display columns (by header name; skipped silently if absent)
   const want=[['Svc Job Num','text'],['Received Date','date'],['Schedule_Date','date'],
     ['Description Of Problem','text'],['Status Code','text'],['Priority','text'],
@@ -723,6 +738,7 @@ function renderResult(res){
       <div style="margin-top:8px">These subs are in your library but have <b>no lat/long</b> &mdash; set them on the Subdivisions tab (inline, or via KMZ) and re-convert:</div>
       <div style="margin-top:8px">${names}</div></div>`);
   }
+  if(res.schedFor) blocks.push(`<div class="note">Schedule_For <b>${esc(res.schedFor)}</b> on every job &mdash; Route4Me will auto-schedule the orders for that day. (Sage&rsquo;s Schedule_Date is untouched.)</div>`);
   warn.innerHTML = blocks.length ? blocks.join('') : `<div class="note">All subdivisions matched. Ready to upload to Route4Me.</div>`;
   document.getElementById('outName').textContent='will save as: '+res.outName;
 }
@@ -2207,7 +2223,7 @@ window.addEventListener('error',ev=>{
 });
 
 // init
-const APP_VERSION='v44 · 2026-08-27';
+const APP_VERSION='v45 · 2026-08-27';
 document.getElementById('appVer').textContent=APP_VERSION+' · '+REGION;
 // region switcher: each region is its own workspace; a click stores the choice
 // and reloads so the whole app boots into that region's storage
