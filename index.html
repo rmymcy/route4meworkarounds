@@ -205,7 +205,7 @@
   <!-- ================= CONVERT ================= -->
   <section id="tab-convert">
     <div class="card" id="welcomeCard">
-      <div class="wgreet">Morning, dispatch. Here&rsquo;s the loop.</div>
+      <div class="wgreet">How it works</div>
       <div class="wsteps">
         <div class="wstep"><span class="wnum">1</span><div><b>Drop the Sage export</b><br>
           The jobs appear below — trim what&rsquo;s not going out, and the priority matrix, aliases and colors apply themselves.</div></div>
@@ -292,6 +292,14 @@
 
   <!-- ================= SUBDIVISIONS ================= -->
   <section id="tab-subs" class="hide">
+    <div class="card">
+      <h2>Dispatch rules</h2>
+      <div class="row" style="align-items:center;gap:12px">
+        <button class="primary small" id="prioBtn2">Priority matrix&hellip;</button>
+        <span class="muted" style="font-size:12.5px">Task families &amp; their mapped Sage task names, the due-date and received-date
+        priority values, and the letter codes (R = rush). Everything is editable; jobs in unmapped tasks keep Sage&rsquo;s own Priority.</span>
+      </div>
+    </div>
     <div class="card">
       <h2>Subdivisions</h2>
       <div class="toolbar">
@@ -1434,7 +1442,9 @@ function renderSubsMap(fit){
   const wrap=document.getElementById('subsMapWrap');
   if(!wrap||wrap.classList.contains('hide')||!mapAvailable()) return;
   if(!subsMapInstance){
-    subsMapInstance=L.map('subsMapWrap',{zoomControl:true,zoomDelta:0.5,zoomSnap:0.5,preferCanvas:true}).setView(REGION_CENTER,8);
+    // SVG renderer (no preferCanvas): canvas was for the old 8k-sub company
+    // page and is the renderer implicated in Chrome tab crashes
+    subsMapInstance=L.map('subsMapWrap',{zoomControl:true,zoomDelta:0.5,zoomSnap:0.5}).setView(REGION_CENTER,8);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'© OpenStreetMap',maxZoom:19}).addTo(subsMapInstance);
     subsMapLayer=L.layerGroup().addTo(subsMapInstance);
     const info=L.control({position:'topright'});
@@ -2383,6 +2393,7 @@ document.getElementById('removeSelBtn').onclick=()=>{
 document.getElementById('restoreBtn').onclick=()=>{ jobsRows.forEach(r=>r.removed=false); renderJobs(); showToast('Restored'); };
 document.getElementById('colsBtn').onclick=openColsModal;
 document.getElementById('prioBtn').onclick=openPrioModal;
+document.getElementById('prioBtn2').onclick=openPrioModal;
 document.getElementById('genBtn').onclick=()=>{
   const kept=jobsRows.filter(r=>!r.removed).map(r=>r.cells);
   if(!kept.length){ showToast('No jobs left to send'); return; }
@@ -2537,7 +2548,7 @@ window.addEventListener('error',ev=>{
 });
 
 // init
-const APP_VERSION='v53 · 2026-08-28';
+const APP_VERSION='v54 · 2026-08-28';
 document.getElementById('appVer').textContent=APP_VERSION+' · '+REGION;
 // region switcher: each region is its own workspace; a click stores the choice
 // and reloads so the whole app boots into that region's storage
