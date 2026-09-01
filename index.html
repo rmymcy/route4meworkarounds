@@ -212,23 +212,40 @@
         <div class="wstep"><span class="wnum">2</span><div><b>Build &amp; upload to Route4Me</b><br>
           Import the file as <i>orders</i>, pick the day, and schedule by territory. Duplicates are pre-numbered, RUSH is pre-flagged.</div></div>
         <div class="wstep"><span class="wnum">3</span><div><b>Bring the routes back</b><br>
-          Drop the Route4Me export(s) at the bottom — you get the Sage import plus the CFF calc requests, ready to send.</div></div>
+          Drop the Route4Me export(s) in the right-hand box — you get the Sage import plus the CFF calc requests, ready to send.</div></div>
       </div>
       <p class="muted" style="margin:14px 2px 0;font-size:12px">Region tabs up top keep FL · HOU · DFW · ASA fully separate.
       The subdivision library and crews live in <b>Settings</b>.</p>
     </div>
-    <div class="card">
-      <h2>1. Sage export (file01)</h2>
-      <div id="drop" class="drop">
-        <p style="margin:0 0 8px"><b>Drag &amp; drop</b> the Sage CSV here, or</p>
-        <button class="primary" id="pickBtn">Choose file&hellip;</button>
-        <input type="file" id="file" accept=".csv,text/csv" class="hide">
-        <p id="fileName" class="muted" style="margin:12px 0 0"></p>
+    <div class="split">
+      <div class="card">
+        <h2>Send out &mdash; Sage export (file01)</h2>
+        <div id="drop" class="drop">
+          <p style="margin:0 0 8px"><b>Drag &amp; drop</b> the Sage CSV here, or</p>
+          <button class="primary" id="pickBtn">Choose file&hellip;</button>
+          <input type="file" id="file" accept=".csv,text/csv" class="hide">
+          <p id="fileName" class="muted" style="margin:12px 0 0"></p>
+        </div>
+      </div>
+      <div class="card" style="margin-bottom:18px">
+        <h2>Bring back &mdash; Route4Me export (file03)</h2>
+        <label class="fld">Paired Sage export (file01)</label>
+        <div id="f1box" class="note" style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:14px">
+          <span id="f1status">No file01 loaded yet.</span>
+          <span><button class="small" id="f1pickBtn">Use a different file01&hellip;</button>
+          <input type="file" id="f1file" accept=".csv,text/csv" class="hide"></span>
+        </div>
+        <div id="drop3" class="drop">
+          <p style="margin:0 0 8px"><b>Drag &amp; drop</b> the Route4Me export(s) here &mdash; several merge into one &mdash; or</p>
+          <button class="primary" id="pick3Btn">Choose file(s)&hellip;</button>
+          <input type="file" id="file3" accept=".csv,text/csv" multiple class="hide">
+          <p id="file3Name" class="muted" style="margin:12px 0 0"></p>
+        </div>
       </div>
     </div>
 
     <div class="card hide" id="trimCard">
-      <h2>2. Review &amp; trim</h2>
+      <h2>Review &amp; trim</h2>
       <div id="trimWarn" class="hide" style="margin-bottom:14px"></div>
       <div class="toolbar">
         <button class="small danger" id="removeSelBtn">Remove selected (0)</button>
@@ -249,7 +266,7 @@
     </div>
 
     <div class="card hide" id="resultCard">
-      <h2>3. Download</h2>
+      <h2>Download for Route4Me</h2>
       <div class="stat" id="stats"></div>
       <div style="margin:16px 0" id="warnBox"></div>
       <div class="row">
@@ -260,27 +277,10 @@
     </div>
   </section>
 
-  <!-- ================= BRING BACK (file03 -> file04) ================= -->
+  <!-- ================= BRING BACK result (file03 -> file04) ================= -->
   <section id="tab-bring">
-    <div class="card">
-      <h2>4. Bring back &mdash; Route4Me export (file03)</h2>
-      <label class="fld">Paired Sage export (file01)</label>
-      <div id="f1box" class="note" style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:14px">
-        <span id="f1status">No file01 loaded yet.</span>
-        <span><button class="small" id="f1pickBtn">Use a different file01&hellip;</button>
-        <input type="file" id="f1file" accept=".csv,text/csv" class="hide"></span>
-      </div>
-
-      <div id="drop3" class="drop">
-        <p style="margin:0 0 8px"><b>Drag &amp; drop</b> the Route4Me export(s) (file03) here &mdash; several at once is fine, they merge &mdash; or</p>
-        <button class="primary" id="pick3Btn">Choose file(s)&hellip;</button>
-        <input type="file" id="file3" accept=".csv,text/csv" multiple class="hide">
-        <p id="file3Name" class="muted" style="margin:12px 0 0"></p>
-      </div>
-    </div>
-
     <div class="card hide" id="result4Card">
-      <h2>5. Sage import (file04)</h2>
+      <h2>Sage import (file04)</h2>
       <div class="stat" id="stats4"></div>
       <div style="margin:16px 0" id="warn4Box"></div>
       <div class="row">
@@ -851,7 +851,29 @@ function loadFile01ForReview(text,name){
   document.getElementById('trimCard').classList.remove('hide');
   document.getElementById('welcomeCard').classList.add('hide'); // work has started — get out of the way
   document.getElementById('resultCard').classList.add('hide');
+  // spaced hues per distinct task so similar-length names never blur together
+  TASK_HUES.clear();
+  const iTk2=findCol(jobsHeader,'Description Of Problem');
+  if(iTk2>=0){
+    const tasks=[...new Set(jobsRows.map(r=>norm(r.cells[iTk2])).filter(Boolean))].sort();
+    tasks.forEach((t,i)=>TASK_HUES.set(t, Math.round(i*137.508)%360));
+  }
   renderJobs();
+  setTimeout(scanUnmatchedAtImport,60); // sub resolution up front — Build becomes one click
+}
+function scanUnmatchedAtImport(){
+  if(!jobsHeader) return;
+  const iSubC=findCol(jobsHeader,'Subdiv Name'); if(iSubC<0) return;
+  const idx=buildIndex();
+  const unmatched=new Map();
+  for(const r of jobsRows){
+    if(r.removed) continue;
+    const v=r.cells[iSubC]!=null?r.cells[iSubC]:'';
+    const m=matchSub(v, idx);
+    if(!m.sub){ const key=String(v).trim(); const rec=unmatched.get(key)||{count:0}; rec.count++; unmatched.set(key,rec); }
+  }
+  if(!unmatched.size) return;
+  openUnmatchedModal(unmatched, scanUnmatchedAtImport, {mode:'import'});
 }
 function jobsView(){
   const v=jobsRows.filter(r=>!r.removed);
@@ -898,7 +920,12 @@ function statusChipHtml(code){
   const cls={cff:'job-status-cff','if':'job-status-if',fv:'job-status-fv',fe:'job-status-fe'}[norm(v)]||'';
   return `<span class="job-status ${cls}">${esc(v)}</span>`;
 }
-function taskColor(t){ let h=0; const s=norm(t); for(let i=0;i<s.length;i++) h=(h*31+s.charCodeAt(i))>>>0; return h%360; }
+const TASK_HUES=new Map(); // per-import golden-angle hues (set in loadFile01ForReview)
+function taskColor(t){
+  const k=norm(t);
+  if(TASK_HUES.has(k)) return TASK_HUES.get(k);
+  let h=0; for(let i=0;i<k.length;i++) h=(h*31+k.charCodeAt(i))>>>0; return h%360;
+}
 function taskBadgeHtml(t){
   const v=String(t||'').trim(); if(!v) return '';
   const h=taskColor(v);
@@ -945,13 +972,14 @@ function jobsClick(e){
   }
   renderJobs();
 }
-function runConvertRows(header, dataRows){
+function runConvertRows(header, dataRows, autoDl){
   let res;
   try{ res=buildFile02([header, ...dataRows]); }
   catch(e){ showToast(e.message); return; }
   lastResult=res; lastGenHeader=header; lastGenRows=dataRows;
   renderResult(res);
-  if(res.unmatched.size){ openUnmatchedModal(res.unmatched, ()=>runConvertRows(header,dataRows)); }
+  if(res.unmatched.size){ openUnmatchedModal(res.unmatched, ()=>runConvertRows(header,dataRows,autoDl)); }
+  else if(autoDl){ downloadResult(); showToast('Route4Me file downloaded'); }
 }
 let lastGenHeader=null, lastGenRows=null;
 
@@ -1204,7 +1232,8 @@ function setFile01(text,name,fromStash){
 }
 
 /* ============================ SUB RESOLUTION MODAL (fuzzy review cards) ============================ */
-function openUnmatchedModal(unmatched, onResolvedRerun){
+function openUnmatchedModal(unmatched, onResolvedRerun, opts){
+  const atImport=!!(opts&&opts.mode==='import');
   const entries=[...unmatched.entries()].map(([raw,info],i)=>({raw,count:info.count,i,resolved:null}));
   const root=document.getElementById('modalRoot');
   root.innerHTML=`
@@ -1214,8 +1243,8 @@ function openUnmatchedModal(unmatched, onResolvedRerun){
         <div class="muted" style="font-size:13px;margin-top:4px"><b>Match</b> routes this import only &middot; <b>Match + alias</b> also saves the spelling so future imports auto-resolve &middot; or pick any sub / create new.</div></div>
       <div class="mb" id="umBody"></div>
       <div class="mf">
-        <button id="umSkip">Convert with blanks</button>
-        <button class="primary" id="umDone" disabled>Re-convert</button>
+        <button id="umSkip">${atImport?'Resolve later':'Convert with blanks'}</button>
+        <button class="primary" id="umDone" disabled>${atImport?'Done':'Re-convert'}</button>
       </div>
     </div>
   </div>`;
@@ -1290,8 +1319,10 @@ function openUnmatchedModal(unmatched, onResolvedRerun){
       }
     });
   }
-  document.getElementById('umSkip').addEventListener('click',()=>{ root.innerHTML=''; showToast('Converted with blank coordinates for unresolved rows'); });
-  document.getElementById('umDone').addEventListener('click',()=>{ root.innerHTML=''; renderSubs(); onResolvedRerun(); showToast('Re-converted with your matches'); });
+  document.getElementById('umSkip').addEventListener('click',()=>{ root.innerHTML='';
+    showToast(atImport?'Unresolved subs will get blank coordinates unless fixed before Build':'Converted with blank coordinates for unresolved rows'); });
+  document.getElementById('umDone').addEventListener('click',()=>{ root.innerHTML=''; renderSubs(); onResolvedRerun();
+    if(!atImport) showToast('Re-converted with your matches'); });
 }
 
 /* Filter-as-you-type combo over all subs (names, nicknames, aliases). Ported from dispatch. */
@@ -2397,7 +2428,7 @@ document.getElementById('prioBtn2').onclick=openPrioModal;
 document.getElementById('genBtn').onclick=()=>{
   const kept=jobsRows.filter(r=>!r.removed).map(r=>r.cells);
   if(!kept.length){ showToast('No jobs left to send'); return; }
-  runConvertRows(jobsHeader, kept);
+  runConvertRows(jobsHeader, kept, true); // all matched -> one click, file downloads
   document.getElementById('resultCard').scrollIntoView({behavior:'smooth',block:'nearest'});
 };
 
@@ -2433,7 +2464,7 @@ document.getElementById('f1pickBtn').onclick=()=>document.getElementById('f1file
 document.getElementById('f1file').onchange=e=>{ const f=e.target.files[0]; if(!f)return; const rd=new FileReader(); rd.onload=()=>{ setFile01(rd.result,f.name,false); if(file03Text) runReverse(); }; rd.readAsText(f); };
 document.getElementById('download4Btn').onclick=download4;
 document.getElementById('downloadBtn').onclick=downloadResult;
-document.getElementById('reviewUnmatchedBtn').onclick=()=>{ if(lastResult&&lastResult.unmatched.size&&lastGenHeader) openUnmatchedModal(lastResult.unmatched,()=>runConvertRows(lastGenHeader,lastGenRows)); };
+document.getElementById('reviewUnmatchedBtn').onclick=()=>{ if(lastResult&&lastResult.unmatched.size&&lastGenHeader) openUnmatchedModal(lastResult.unmatched,()=>runConvertRows(lastGenHeader,lastGenRows,true)); };
 
 // subs
 document.getElementById('subSearch').oninput=renderSubs;
@@ -2548,7 +2579,7 @@ window.addEventListener('error',ev=>{
 });
 
 // init
-const APP_VERSION='v54 · 2026-08-28';
+const APP_VERSION='v55 · 2026-08-28';
 document.getElementById('appVer').textContent=APP_VERSION+' · '+REGION;
 // region switcher: each region is its own workspace; a click stores the choice
 // and reloads so the whole app boots into that region's storage
