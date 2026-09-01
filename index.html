@@ -1474,7 +1474,10 @@ function parseDateKey(s){
   let y=+m[3]; if(y<100) y+=2000;
   return y*10000 + (+m[1])*100 + (+m[2]);
 }
-function loadFile01ForReview(text,name){
+const K_TRIM=RK+'trimstate_v1';   // which rows were trimmed, so a refresh keeps the day's state
+const K_UITAB=RK+'uitab_v1';     // which page (Dispatch/Settings) was open
+function persistTrim(){ try{ save(K_TRIM,{name:file01Name||'',removed:jobsRows.filter(r=>r.removed).map(r=>r.id)}); }catch(e){} }
+function loadFile01ForReview(text,name,restoring){
   let rows;
   try{ rows=parseCSV(text).filter(r=>r.some(c=>String(c).trim()!=='')); }
   catch(e){ showToast('Could not read that CSV'); return; }
@@ -1526,7 +1529,10 @@ function loadFile01ForReview(text,name){
     tasks.forEach((t,i)=>TASK_HUES.set(t, Math.round(i*137.508)%360));
   }
   renderJobs();
-  setTimeout(scanUnmatchedAtImport,60); // sub resolution up front — Build becomes one click
+  if(!restoring){
+    persistTrim(); // fresh import starts a fresh trim state
+    setTimeout(scanUnmatchedAtImport,60); // sub resolution up front — Build becomes one click
+  }
 }
 function scanUnmatchedAtImport(){
   if(!jobsHeader) return;
@@ -3060,6 +3066,7 @@ document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{
   t.classList.add('active');
   const show=new Set(TAB_GROUPS[t.dataset.tab]||[]);
   ['convert','bring','subs','crews'].forEach(id=>document.getElementById('tab-'+id).classList.toggle('hide',!show.has(id)));
+  try{ save(K_UITAB,t.dataset.tab); }catch(e){}
 });
 // file / drop (file01 -> file02)
 const drop=document.getElementById('drop'), fileInput=document.getElementById('file');
@@ -3087,9 +3094,9 @@ document.getElementById('jobsHead').addEventListener('click',e=>{
 document.getElementById('removeSelBtn').onclick=()=>{
   if(!jobsSel.size){ showToast('Select rows first'); return; }
   jobsRows.forEach(r=>{ if(jobsSel.has(r.id)) r.removed=true; });
-  const n=jobsSel.size; jobsSel.clear(); jobsAnchor=null; renderJobs(); showToast(`Removed ${n} job(s)`);
+  const n=jobsSel.size; jobsSel.clear(); jobsAnchor=null; renderJobs(); persistTrim(); showToast(`Removed ${n} job(s)`);
 };
-document.getElementById('restoreBtn').onclick=()=>{ jobsRows.forEach(r=>r.removed=false); renderJobs(); showToast('Restored'); };
+document.getElementById('restoreBtn').onclick=()=>{ jobsRows.forEach(r=>r.removed=false); renderJobs(); persistTrim(); showToast('Restored'); };
 document.getElementById('colsBtn').onclick=openColsModal;
 document.getElementById('prioBtn').onclick=openPrioModal;
 document.getElementById('prioBtn2').onclick=openPrioModal;
@@ -3103,7 +3110,22 @@ document.getElementById('genBtn').onclick=()=>{
 // Bring back (file03 -> file04)
 (function(){
   const stash=load(K_LASTIMPORT,null);
-  if(stash && stash.text) setFile01(stash.text, stash.name||'file01.csv', true);
+  if(stash && stash.text){
+    setFile01(stash.text, stash.name||'file01.csv', true);
+    // the day's jobs survive a refresh: restore the trim table quietly
+    try{
+      loadFile01ForReview(stash.text, stash.name||'file01.csv', true);
+      const ts=load(K_TRIM,null);
+      if(ts && ts.name===(stash.name||'file01.csv') && Array.isArray(ts.removed) && ts.removed.length){
+        const ids=new Set(ts.removed);
+        jobsRows.forEach(r=>{ if(ids.has(r.id)) r.removed=true; });
+        renderJobs();
+      }
+    }catch(e){ console.error(e); }
+  }
+  // reopen the page that was in use
+  const t0=load(K_UITAB,'dispatch');
+  if(t0!=='dispatch'){ const el=document.querySelector(`.tab[data-tab="${t0}"]`); if(el) el.click(); }
 })();
 const drop3=document.getElementById('drop3'), file3In=document.getElementById('file3');
 document.getElementById('pick3Btn').onclick=()=>file3In.click();
@@ -3247,7 +3269,7 @@ window.addEventListener('error',ev=>{
 });
 
 // init
-const APP_VERSION='v59 · 2026-08-28';
+const APP_VERSION='v60 · 2026-08-28';
 document.getElementById('appVer').textContent=APP_VERSION+' · '+REGION;
 // region switcher: each region is its own workspace; a click stores the choice
 // and reloads so the whole app boots into that region's storage
