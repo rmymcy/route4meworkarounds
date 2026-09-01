@@ -510,7 +510,7 @@ function openColsModal(){
   const opts=jobsHeader.map(h=>String(h).trim()).filter(h=>h&&!coreNorm.has(norm(h)));
   const root=document.getElementById('modalRoot');
   root.innerHTML=`<div class="backdrop"><div class="modal" style="max-width:460px"><div class="mh"><h3>Route4Me file columns</h3>
-    <div class="muted" style="font-size:12.5px;margin-top:4px">Core columns always included: <b>Address 1, Alias (task - builder), Latitude, Longitude, Svc Job Num</b>
+    <div class="muted" style="font-size:12.5px;margin-top:4px">Core columns always included: <b>Address 1, Alias (task - subdivision), Latitude, Longitude, Svc Job Num</b>
     (Svc Job Num is the key that splices the Route4Me export back onto the Sage export). Check anything extra you want visible in Route4Me.</div></div>
   <div class="mb" style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
     ${opts.map(h=>`<label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer">
@@ -553,10 +553,11 @@ function buildFile02(rows){
     const m=sfEl.value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
     if(m) schedFor=`${+m[2]}/${+m[3]}/${m[1]}`;
   }
-  // Alias: task + builder combined, e.g. "FORM SURVEY - Taylor Morrison (MCO"
-  const iTask=findCol(header,'Description Of Problem'), iBuild=findCol(header,'Builder Name');
-  const aliasFor=cells=>[iTask>=0?String(cells[iTask]||'').trim():'', iBuild>=0?String(cells[iBuild]||'').trim():'']
-    .filter(Boolean).join(' - ');
+  // Alias: task + subdivision combined, e.g. "FORM SURVEY - Laureate Park".
+  // Uses the full library sub name when matched (Sage's Subdiv Name is truncated).
+  const iTask=findCol(header,'Description Of Problem');
+  const aliasFor=(cells,subName)=>[iTask>=0?String(cells[iTask]||'').trim():'',
+    String(subName||cells[iSub]||'').trim()].filter(Boolean).join(' - ');
   const plan=[], placed=new Set();
   const addOrig=i=>{ if(i>=0 && !placed.has(i) && !skip.has(i)){ plan.push({k:'orig',i}); placed.add(i); } };
   addOrig(iAddr);
@@ -592,7 +593,7 @@ function buildFile02(rows){
       const rec=unmatched.get(key)||{count:0};
       rec.count++; unmatched.set(key,rec);
     }
-    out.push(reshape(cells, lat, lng, schedFor, aliasFor(cells)));
+    out.push(reshape(cells, lat, lng, schedFor, aliasFor(cells, m.sub?m.sub.name:'')));
   }
 
   const outName=`Route4Me Upload ${REGION} ${todayStamp()}.csv`;
@@ -2228,7 +2229,7 @@ window.addEventListener('error',ev=>{
 });
 
 // init
-const APP_VERSION='v47 · 2026-08-27';
+const APP_VERSION='v48 · 2026-08-27';
 document.getElementById('appVer').textContent=APP_VERSION+' · '+REGION;
 // region switcher: each region is its own workspace; a click stores the choice
 // and reloads so the whole app boots into that region's storage
