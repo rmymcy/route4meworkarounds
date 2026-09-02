@@ -793,6 +793,8 @@ svg.leaflet-image-layer.leaflet-interactive path {
     display:inline-flex;align-items:center;justify-content:center;margin-top:1px}
   .toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%);background:#111827;color:#fff;padding:11px 18px;border-radius:10px;font-size:13px;box-shadow:0 8px 24px rgba(0,0,0,.25);z-index:80;opacity:0;transition:.2s}
   .toast.show{opacity:1}
+  .toast.warn{background:#b45309}
+  .toast.err{background:#b91c1c}
   footer{color:var(--muted);font-size:12px;text-align:center;padding:20px}
   .split{display:grid;grid-template-columns:1fr 1fr;gap:18px}
   @media(max-width:760px){.split{grid-template-columns:1fr}}
@@ -861,7 +863,8 @@ svg.leaflet-image-layer.leaflet-interactive path {
     <div class="sub"><span id="appVer"></span></div>
   </div>
   <nav class="regions" id="regionBar" title="Each region keeps its own subs, crews, imports and settings — nothing crosses"></nav>
-  <nav class="tabs">
+  <button class="small" id="toastLogBtn" title="recent messages" style="margin-left:auto">Log</button>
+  <nav class="tabs" style="margin-left:0">
     <div class="tab active" data-tab="dispatch">Dispatch</div>
     <div class="tab" data-tab="settings">Settings</div>
   </nav>
@@ -907,6 +910,11 @@ svg.leaflet-image-layer.leaflet-interactive path {
           <input type="file" id="file3" accept=".csv,text/csv" multiple class="hide">
           <p id="file3Name" class="muted" style="margin:12px 0 0"></p>
         </div>
+        <div id="bringResult" class="row hide" style="margin-top:14px;align-items:center;gap:10px;flex-wrap:wrap">
+          <button class="primary" id="download4Btn">Download Sage import (file04)</button>
+          <button id="cffBtn" class="hide">CFF</button>
+          <span class="muted" id="bringSummary" style="font-size:12.5px"></span>
+        </div>
       </div>
     </div>
 
@@ -931,29 +939,10 @@ svg.leaflet-image-layer.leaflet-interactive path {
       </div>
     </div>
 
-    <div class="card hide" id="resultCard">
-      <h2>Download for Route4Me</h2>
-      <div class="stat" id="stats"></div>
-      <div style="margin:16px 0" id="warnBox"></div>
-      <div class="row">
-        <button class="primary" id="downloadBtn">Download Route4Me CSV</button>
-        <button id="reviewUnmatchedBtn" class="hide">Fix unmatched subs</button>
-        <span class="muted" id="outName"></span>
-      </div>
-    </div>
   </section>
 
   <!-- ================= BRING BACK result (file03 -> file04) ================= -->
   <section id="tab-bring">
-    <div class="card hide" id="result4Card">
-      <h2>Sage import (file04)</h2>
-      <div class="stat" id="stats4"></div>
-      <div style="margin:16px 0" id="warn4Box"></div>
-      <div class="row">
-        <button class="primary" id="download4Btn">Download Sage import (file04)</button>
-        <span class="muted" id="out4Name"></span>
-      </div>
-    </div>
   </section>
 
   <!-- ================= SUBDIVISIONS ================= -->
@@ -963,7 +952,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
       <div class="row" style="align-items:center;gap:12px">
         <button class="primary small" id="prioBtn2">Priority matrix&hellip;</button>
         <span class="muted" style="font-size:12.5px">Task families &amp; their mapped Sage task names, the due-date and received-date
-        priority values, and the letter codes (R = rush). Everything is editable; jobs in unmapped tasks keep Sage&rsquo;s own Priority.</span>
+        priority values, and the letter codes (R = rush). Everything is editable; jobs in unmapped tasks get a blank Priority.</span>
       </div>
     </div>
     <div class="card">
@@ -1235,7 +1224,7 @@ function openColsModal(){
    Each task family carries values on two scales — how close Schedule_Date is
    to the route day (Due clock) and how old the job is (Received clock) — and
    a job's priority is the HOTTEST (lowest) applicable value. Blank cell = that
-   bucket contributes nothing; a task in no family keeps Sage's Priority.
+   bucket contributes nothing; unmapped tasks get a blank Priority.
    Sage Priority "R" (rush) = 1, over everything. Stored per region. */
 const K_PRIOMX=RK+'priomatrix_v2';
 const PRIO_DUE=['Late','Due that day','1 day before','2+ before'];
@@ -1267,7 +1256,7 @@ function openPrioModal(){
     const keys=Object.keys(fam);
     root.innerHTML=`<div class="backdrop"><div class="modal" style="max-width:680px"><div class="mh"><h3>Priority matrix</h3>
       <div class="muted" style="font-size:12.5px;margin-top:4px">Lower = hotter. A job takes the <b>hottest</b> value its dates hit on either clock.
-      Blank cell = skip that bucket; a task in no family keeps Sage&rsquo;s Priority untouched.
+      Blank cell = skip that bucket; a task in no family gets a blank Priority (Sage&rsquo;s numbers are never passed through).
       Sage Priority <b>R</b> (rush) always becomes <b>1</b>.</div></div>
     <div class="mb">
       <div style="display:grid;grid-template-columns:92px repeat(4,1fr);gap:5px;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;font-weight:600">
@@ -1441,7 +1430,7 @@ function buildFile02(rows){
     if(prioOn){
       const mv=prioFor(cells);
       if(mv!=null){ prio=mv.v; color=prioColor(mv.v); prioApplied++; }
-      else prio=iPrio01>=0?String(cells[iPrio01]||'').trim():'';
+      // unmapped/undated jobs get NO priority — Sage's numbers mean nothing to Route4Me
     }
     out.push(reshape(cells, lat, lng, schedFor, aliasFor(cells, m.sub?m.sub.name:''), prio, color));
   }
@@ -1520,7 +1509,6 @@ function loadFile01ForReview(text,name,restoring){
   } else { warn.className='hide'; warn.innerHTML=''; }
   document.getElementById('trimCard').classList.remove('hide');
   document.getElementById('welcomeCard').classList.add('hide'); // work has started — get out of the way
-  document.getElementById('resultCard').classList.add('hide');
   // spaced hues per distinct task so similar-length names never blur together
   TASK_HUES.clear();
   const iTk2=findCol(jobsHeader,'Description Of Problem');
@@ -1648,48 +1636,23 @@ function jobsClick(e){
 function runConvertRows(header, dataRows, autoDl){
   let res;
   try{ res=buildFile02([header, ...dataRows]); }
-  catch(e){ showToast(e.message); return; }
+  catch(e){ showToast(e.message,'err'); return; }
   lastResult=res; lastGenHeader=header; lastGenRows=dataRows;
-  renderResult(res);
-  if(res.unmatched.size){ openUnmatchedModal(res.unmatched, ()=>runConvertRows(header,dataRows,autoDl)); }
-  else if(autoDl){ downloadResult(); showToast('Route4Me file downloaded'); }
+  if(res.unmatched.size){ openUnmatchedModal(res.unmatched, ()=>runConvertRows(header,dataRows,autoDl)); return; }
+  // details to the log; problems as toasts; the file just downloads
+  if(res.schedFor) logMsg(`Scheduled For ${res.schedFor} stamped on every job`);
+  if(res.prioOn) logMsg(`Priority matrix: ${res.prioApplied} of ${res.jobs} prioritized${res.rushN?` (${res.rushN} letter-coded)`:''}; unmapped left blank`);
+  if(res.noCoords.size){
+    const names=[...res.noCoords].map(([k,n])=>`${k} ×${n}`).join(', ');
+    logMsg(`No coordinates yet: ${names}`,'warn');
+    showToast(`${[...res.noCoords.values()].reduce((a,b)=>a+b,0)} job(s) in subs with no coordinates — fix in Settings (see Log)`,'warn');
+  }
+  downloadFile02Res(res);
+  showToast(`Downloaded ${res.outName} — ${res.jobs} jobs, ${res.matched} geocoded`);
 }
 let lastGenHeader=null, lastGenRows=null;
 
-function renderResult(res){
-  document.getElementById('resultCard').classList.remove('hide');
-  document.getElementById('stats').innerHTML=`
-    <div><b>${res.jobs}</b>job rows</div>
-    <div><b>${res.matched}</b>geocoded</div>
-    <div><b>${res.unmatched.size}</b>unmatched</div>
-    <div><b>${res.jobs-res.matched}</b>blank coords</div>`;
-  const warn=document.getElementById('warnBox');
-  const blocks=[];
-  if(res.unmatched.size){
-    const names=[...res.unmatched.keys()].map(k=>`<span class="chip">${esc(k||'(blank)')}</span>`).join('');
-    blocks.push(`<div class="unmatched"><span class="badge warn">Needs attention</span>
-      <div style="margin-top:8px">${res.unmatched.size} subdivision(s) not in your library &mdash; these job rows will have <b>blank coordinates</b> until you resolve them:</div>
-      <div style="margin-top:8px">${names}</div></div>`);
-    document.getElementById('reviewUnmatchedBtn').classList.remove('hide');
-  }else{
-    document.getElementById('reviewUnmatchedBtn').classList.add('hide');
-  }
-  if(res.noCoords && res.noCoords.size){
-    const names=[...res.noCoords].map(([k,n])=>`<span class="chip">${esc(k)} &times;${n}</span>`).join('');
-    blocks.push(`<div class="unmatched"><span class="badge warn">No coordinates yet</span>
-      <div style="margin-top:8px">These subs are in your library but have <b>no lat/long</b> &mdash; set them on the Subdivisions tab (inline, or via KMZ) and re-convert:</div>
-      <div style="margin-top:8px">${names}</div></div>`);
-  }
-  if(res.schedFor) blocks.push(`<div class="note">Scheduled For <b>${esc(res.schedFor)}</b> on every job &mdash; Route4Me will auto-schedule the orders for that day. (Sage&rsquo;s Schedule_Date is untouched.)</div>`);
-  if(res.prioOn) blocks.push(`<div class="note">Priority matrix: <b>${res.prioApplied}</b> of ${res.jobs} job(s) prioritized${res.rushN?` &mdash; <b>${res.rushN} letter-coded (R&hellip;)</b>`:''}; the rest keep Sage&rsquo;s Priority.</div>`);
-  warn.innerHTML = blocks.length ? blocks.join('') : `<div class="note">All subdivisions matched. Ready to upload to Route4Me.</div>`;
-  document.getElementById('outName').textContent='will save as: '+res.outName;
-}
-
-function downloadResult(){
-  if(!lastResult) return;
-  download(lastResult.outName, toCSV(lastResult.rows), 'text/csv');
-}
+function downloadFile02Res(res){ download(res.outName, toCSV(res.rows), 'text/csv'); }
 
 /* ============================ BRING BACK (file03 -> file04) ============================ */
 let file01Text=null, file01Name=null, file03Text=null, lastFile04=null;
@@ -1854,41 +1817,22 @@ function runReverse(){
   try{ res=reverseConvert(file03Text, file01Text); }
   catch(e){ showToast(e.message); return; }
   lastFile04=res;
-  document.getElementById('result4Card').classList.remove('hide');
   const s=res.st;
-  document.getElementById('stats4').innerHTML=`
-    <div><b>${s.kept}</b>rows in file04</div>
-    <div><b>${s.out2if}</b>OUT &rarr; IF</div>
-    <div><b>${s.feKept+s.fvKept}</b>FE/FV kept</div>
-    <div><b>${s.dropCFF}</b>CFF dropped</div>
-    <div><b>${s.dropUnassigned}</b>unassigned dropped</div>`;
-  const probs=[];
+  logMsg(`file04 built: ${s.kept} rows (${s.out2if} OUT→IF, ${s.feKept+s.fvKept} FE/FV), ${s.dropCFF} CFF dropped, ${s.dropUnassigned} unassigned dropped`);
   if(res.routedMissing>0){
     const frac=res.routedTotal?Math.round(100*res.routedMissing/res.routedTotal):0;
-    probs.push(`<div class="unmatched" style="border-left-color:var(--err);background:var(--err-bg)"><span class="badge err">file01 doesn&rsquo;t match file03</span>
-      <div style="margin-top:6px"><b>${res.routedMissing} of ${res.routedTotal}</b> routed jobs (${frac}%) in file03 aren&rsquo;t in the loaded file01
-      &mdash; so this file01 is probably the wrong batch. Load the raw Sage export that produced <i>this</i> routing with
-      <b>&ldquo;Use a different file01&rdquo;</b> above, then it&rsquo;ll re-run.</div></div>`);
+    showToast(`file01 doesn't match: ${res.routedMissing} of ${res.routedTotal} routed jobs (${frac}%) aren't in the loaded file01 — load the right Sage export`,'err');
   }
-  if(res.unknownCrew.size) probs.push(`<div class="unmatched"><span class="badge err">Unknown crew</span>
-    <div style="margin-top:6px">These drivers from file03 aren&rsquo;t in your Crews library, so Servicer Id was left unchanged:</div>
-    <div style="margin-top:6px">${[...res.unknownCrew].map(([k,n])=>`<span class="chip">${esc(k)} &times;${n}</span>`).join('')}</div></div>`);
-  if(res.missingCode.size) probs.push(`<div class="unmatched"><span class="badge warn">Missing Servicer Id code</span>
-    <div style="margin-top:6px">These crews have no code set (Crews tab), so Servicer Id was left unchanged:</div>
-    <div style="margin-top:6px">${[...res.missingCode].map(([k,n])=>`<span class="chip">${esc(k)} &times;${n}</span>`).join('')}</div></div>`);
-  if(res.cffReq.length){
-    const crews=new Set(res.cffReq.map(x=>x.code)).size;
-    probs.push(`<div class="note" style="display:flex;align-items:center;gap:10px"><span style="flex:1"><b>${res.cffReq.length}</b> routed CFF job${res.cffReq.length===1?'':'s'}
-      across <b>${crews}</b> crew${crews===1?'':'s'} &mdash; dropped from the Sage import; send the calc request instead.</span>
-      <button class="small primary" id="cffOpenBtn">CFF calc requests&hellip;</button></div>`);
-  } else if(s.dropCFF>0){
-    probs.push(`<div class="note">${s.dropCFF} CFF row(s) dropped &mdash; none were routed to a coded crew, so there&rsquo;s nothing to request.</div>`);
-  }
-  document.getElementById('warn4Box').innerHTML = probs.length ? probs.join('')
-    : `<div class="note">Every kept job got a crew Servicer Id. Ready to import into Sage.</div>`;
-  const cffBtn=document.getElementById('cffOpenBtn');
-  if(cffBtn) cffBtn.onclick=()=>openCffModal(res);
-  document.getElementById('out4Name').textContent='will save as: '+res.outName;
+  if(res.unknownCrew.size) showToast(`Unknown crew in file03: ${[...res.unknownCrew.keys()].join(', ')} — Servicer Id left unchanged`,'warn');
+  if(res.missingCode.size) showToast(`Crews missing a Servicer Id code: ${[...res.missingCode.keys()].join(', ')} (Settings → Crews)`,'warn');
+  const row=document.getElementById('bringResult');
+  row.classList.remove('hide');
+  const cffBtn=document.getElementById('cffBtn');
+  if(res.cffReq.length){ cffBtn.classList.remove('hide'); cffBtn.onclick=()=>openCffModal(res);
+    logMsg(`${res.cffReq.length} CFF calc request(s) across ${new Set(res.cffReq.map(x=>x.code)).size} crew(s)`); }
+  else cffBtn.classList.add('hide');
+  document.getElementById('bringSummary').textContent=
+    `${s.kept} rows · ${s.out2if} OUT→IF · ${s.dropCFF} CFF dropped · ${s.dropUnassigned} unassigned dropped · ${res.outName}`;
 }
 function download4(){
   if(!lastFile04) return;
@@ -3054,7 +2998,26 @@ function applyKmz(){
 /* ============================ HELPERS ============================ */
 function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 let toastT;
-function showToast(msg){ const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(toastT); toastT=setTimeout(()=>t.classList.remove('show'),2600); }
+const TOAST_LOG=[]; // {t, msg, kind} newest first — reviewable via the Log button
+function logMsg(msg,kind){ TOAST_LOG.unshift({t:new Date(),msg:String(msg),kind:kind||'info'}); if(TOAST_LOG.length>200) TOAST_LOG.length=200; }
+function showToast(msg,kind){
+  logMsg(msg,kind);
+  const t=document.getElementById('toast');
+  t.textContent=msg; t.className='toast show'+(kind==='warn'?' warn':kind==='err'?' err':'');
+  clearTimeout(toastT); toastT=setTimeout(()=>t.classList.remove('show'),kind&&kind!=='info'?4200:2600);
+}
+function openToastLog(){
+  const root=document.getElementById('modalRoot2');
+  const fmt=d=>`${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}:${String(d.getSeconds()).padStart(2,'0')}`;
+  root.innerHTML=`<div class="backdrop"><div class="modal" style="max-width:640px"><div class="mh"><h3>Log</h3>
+    <div class="muted" style="font-size:12px;margin-top:4px">Everything the tool has said this session, newest first.</div></div>
+  <div class="mb">${TOAST_LOG.length?TOAST_LOG.map(e=>`<div style="display:flex;gap:10px;padding:6px 4px;border-bottom:1px solid var(--line);font-size:12.5px">
+      <span class="pin" style="flex:0 0 62px;color:var(--muted)">${fmt(e.t)}</span>
+      <span style="flex:1;${e.kind==='err'?'color:var(--err);font-weight:600':e.kind==='warn'?'color:#b45309;font-weight:600':''}">${esc(e.msg)}</span></div>`).join('')
+    :'<div class="muted" style="padding:12px 0">Nothing yet.</div>'}</div>
+  <div class="mf"><button id="tlClose">Close</button></div></div></div>`;
+  document.getElementById('tlClose').onclick=()=>root.innerHTML='';
+}
 function download(name,text,type){ const b=new Blob([text],{type:type||'application/json'}); const a=document.createElement('a'); a.href=URL.createObjectURL(b); a.download=name; a.click(); setTimeout(()=>URL.revokeObjectURL(a.href),2000); }
 
 /* ============================ WIRING ============================ */
@@ -3103,8 +3066,7 @@ document.getElementById('prioBtn2').onclick=openPrioModal;
 document.getElementById('genBtn').onclick=()=>{
   const kept=jobsRows.filter(r=>!r.removed).map(r=>r.cells);
   if(!kept.length){ showToast('No jobs left to send'); return; }
-  runConvertRows(jobsHeader, kept, true); // all matched -> one click, file downloads
-  document.getElementById('resultCard').scrollIntoView({behavior:'smooth',block:'nearest'});
+  runConvertRows(jobsHeader, kept, true); // one click: build + download
 };
 
 // Bring back (file03 -> file04)
@@ -3153,8 +3115,7 @@ function read3(files){
 document.getElementById('f1pickBtn').onclick=()=>document.getElementById('f1file').click();
 document.getElementById('f1file').onchange=e=>{ const f=e.target.files[0]; if(!f)return; const rd=new FileReader(); rd.onload=()=>{ setFile01(rd.result,f.name,false); if(file03Text) runReverse(); }; rd.readAsText(f); };
 document.getElementById('download4Btn').onclick=download4;
-document.getElementById('downloadBtn').onclick=downloadResult;
-document.getElementById('reviewUnmatchedBtn').onclick=()=>{ if(lastResult&&lastResult.unmatched.size&&lastGenHeader) openUnmatchedModal(lastResult.unmatched,()=>runConvertRows(lastGenHeader,lastGenRows,true)); };
+document.getElementById('toastLogBtn').onclick=openToastLog;
 
 // subs
 document.getElementById('subSearch').oninput=renderSubs;
@@ -3269,7 +3230,7 @@ window.addEventListener('error',ev=>{
 });
 
 // init
-const APP_VERSION='v62 · 2026-08-28';
+const APP_VERSION='v63 · 2026-08-28';
 document.getElementById('appVer').textContent=APP_VERSION+' · '+REGION;
 // region switcher: each region is its own workspace; a click stores the choice
 // and reloads so the whole app boots into that region's storage
