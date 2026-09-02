@@ -1204,7 +1204,7 @@ function openColsModal(){
   const opts=jobsHeader.map(h=>String(h).trim()).filter(h=>h&&!coreNorm.has(norm(h)));
   const root=document.getElementById('modalRoot');
   root.innerHTML=`<div class="backdrop"><div class="modal" style="max-width:460px"><div class="mh"><h3>Route4Me file columns</h3>
-    <div class="muted" style="font-size:12.5px;margin-top:4px">Core columns always included: <b>Address 1, Alias (task - subdivision), Latitude, Longitude, Svc Job Num</b>
+    <div class="muted" style="font-size:12.5px;margin-top:4px">Core columns always included: <b>Alias (task - subdivision - address), Latitude, Longitude, Svc Job Num, Scheduled For, Priority, Color</b>
     (Svc Job Num is the key that splices the Route4Me export back onto the Sage export). Check anything extra you want visible in Route4Me.</div></div>
   <div class="mb" style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
     ${opts.map(h=>`<label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer">
@@ -3230,7 +3230,7 @@ window.addEventListener('error',ev=>{
 });
 
 // init
-const APP_VERSION='v63 · 2026-08-28';
+const APP_VERSION='v64 · 2026-08-28';
 document.getElementById('appVer').textContent=APP_VERSION+' · '+REGION;
 // region switcher: each region is its own workspace; a click stores the choice
 // and reloads so the whole app boots into that region's storage
