@@ -1397,9 +1397,9 @@ function buildFile02(rows){
     return cand.length?{v:String(Math.min(...cand)),rush:false}:null;
   };
   // marker color: heat fade by matrix tier (red -> white as priority cools)
-  const prioColor=v=>{ const n=+v; if(!isFinite(n)) return '';
-    return n<=1?'#FF0000' : n<=10?'#FF5A5A' : n<=15?'#FF7A00' : n<=20?'#FFB055'
-      : n<=30?'#FFE000' : n<=40?'#FFEB80' : n<=60?'#FFF5C2' : '#FFFFFF'; };
+  const prioColor=v=>{ const n=+v; if(!isFinite(n)) return '';  // bare hex, no # (Route4Me's format)
+    return n<=1?'FF0000' : n<=10?'FF5A5A' : n<=15?'FF7A00' : n<=20?'FFB055'
+      : n<=30?'FFE000' : n<=40?'FFEB80' : n<=60?'FFF5C2' : 'FFFFFF'; };
   const plan=[], placed=new Set();
   const addOrig=i=>{ if(i>=0 && !placed.has(i) && !skip.has(i)){ plan.push({k:'orig',i}); placed.add(i); } };
   // no Address column: the address rides inside the Alias (re-addable via Columns…)
@@ -3269,7 +3269,7 @@ window.addEventListener('error',ev=>{
 });
 
 // init
-const APP_VERSION='v61 · 2026-08-28';
+const APP_VERSION='v62 · 2026-08-28';
 document.getElementById('appVer').textContent=APP_VERSION+' · '+REGION;
 // region switcher: each region is its own workspace; a click stores the choice
 // and reloads so the whole app boots into that region's storage
