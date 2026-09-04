@@ -956,6 +956,17 @@ svg.leaflet-image-layer.leaflet-interactive path {
       </div>
     </div>
     <div class="card">
+      <h2>Route4Me API</h2>
+      <div class="row" style="align-items:center;gap:10px;flex-wrap:wrap">
+        <input type="password" id="apiKey" placeholder="API key" autocomplete="off" style="flex:1;min-width:260px;font-family:ui-monospace,Menlo,monospace">
+        <button class="small" id="apiKeyShow" title="show/hide">&#128065;</button>
+        <button class="primary small" id="apiTestBtn">Test connection</button>
+        <span id="apiStatus" class="muted" style="font-size:12.5px"></span>
+      </div>
+      <p class="muted" style="margin:10px 2px 0;font-size:12px">Stored only in this browser (shared by all regions) — never in the file, never sent anywhere except api.route4me.com.
+      The test makes one read-only call to check whether the browser can reach their API directly.</p>
+    </div>
+    <div class="card">
       <h2>Subdivisions</h2>
       <div class="toolbar">
         <input type="search" class="grow" id="subSearch" placeholder="Filter&hellip;">
@@ -3125,6 +3136,46 @@ document.getElementById('f1file').onchange=e=>{ const f=e.target.files[0]; if(!f
 document.getElementById('download4Btn').onclick=download4;
 document.getElementById('toastLogBtn').onclick=openToastLog;
 
+/* ==== Route4Me API (probe phase) ====
+   Key is account-wide, so it's stored under one un-prefixed browser key,
+   shared by all regions. The test makes ONE read-only call; the result tells
+   us whether direct browser->API integration is possible (CORS) before any
+   real integration is built. */
+const K_APIKEY='r4m_apikey_v1';
+(function(){
+  const inp=document.getElementById('apiKey');
+  try{ inp.value=localStorage.getItem(K_APIKEY)||''; }catch(e){}
+  inp.addEventListener('change',()=>{ try{ localStorage.setItem(K_APIKEY,inp.value.trim()); }catch(e){} });
+  document.getElementById('apiKeyShow').onclick=()=>{ inp.type=inp.type==='password'?'text':'password'; };
+  const stat=document.getElementById('apiStatus');
+  const setStat=(msg,color)=>{ stat.textContent=msg; stat.style.color=color||''; };
+  document.getElementById('apiTestBtn').onclick=async()=>{
+    const key=inp.value.trim();
+    if(!key){ setStat('Enter the API key first','#b45309'); return; }
+    try{ localStorage.setItem(K_APIKEY,key); }catch(e){}
+    setStat('Testing…');
+    try{
+      const r=await fetch('https://api.route4me.com/api.v4/optimization_problem.php?api_key='+encodeURIComponent(key)+'&limit=1&offset=0',
+        {method:'GET'}); // simple request: no headers, so no CORS preflight
+      if(r.status===401||r.status===403){
+        setStat(`Key rejected by Route4Me (HTTP ${r.status}) — the browser CAN reach the API, the key is the problem`,'var(--err)');
+        showToast('API reachable, but the key was rejected — double-check it','err'); return;
+      }
+      if(!r.ok){ setStat(`Route4Me answered HTTP ${r.status} — reachable, unexpected reply`, '#b45309');
+        showToast(`API reachable — unexpected HTTP ${r.status} (see Log)`,'warn'); logMsg(`API test: HTTP ${r.status}`,'warn'); return; }
+      const j=await r.json().catch(()=>null);
+      const n=j&&Array.isArray(j.optimizations)?j.optimizations.length:null;
+      setStat('Connected — browser can talk to Route4Me directly'+(n!=null?` (${n?'optimization data visible':'no optimizations yet, auth OK'})`:''),'var(--ok)');
+      showToast('Route4Me API: connected. Direct integration is a go.');
+      logMsg('API test: SUCCESS — direct browser integration possible (no helper needed)');
+    }catch(e){
+      setStat('Blocked — the browser could not reach the API (CORS or network). Integration will need the small local helper.','var(--err)');
+      showToast('API blocked from the browser (see Log)','err');
+      logMsg('API test: blocked — '+(e&&e.message||'network/CORS error')+'. Plan B: local helper relay.','err');
+    }
+  };
+})();
+
 // subs
 document.getElementById('subSearch').oninput=renderSubs;
 document.getElementById('addSubBtn').onclick=()=>editSubModal(-1);
@@ -3238,7 +3289,7 @@ window.addEventListener('error',ev=>{
 });
 
 // init
-const APP_VERSION='v4 · 2026-09-02';
+const APP_VERSION='v5 · 2026-09-02';
 document.getElementById('appVer').textContent=APP_VERSION+' · '+REGION;
 // region switcher: each region is its own workspace; a click stores the choice
 // and reloads so the whole app boots into that region's storage
