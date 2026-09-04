@@ -1426,6 +1426,7 @@ function buildFile02(rows){
       const rec=unmatched.get(key)||{count:0};
       rec.count++; unmatched.set(key,rec);
     }
+    if(!lat) continue; // only geocoded rows export — unresolved / coordless jobs are dropped (and reported)
     let prio='', color='';
     if(prioOn){
       const mv=prioFor(cells);
@@ -1633,22 +1634,27 @@ function jobsClick(e){
   }
   renderJobs();
 }
+function finishExport(res){
+  if(!res.matched){ showToast('Nothing geocoded — nothing to export. Resolve subs or set coordinates first.','err'); return; }
+  if(res.schedFor) logMsg(`Scheduled For ${res.schedFor} stamped on every job`);
+  if(res.prioOn) logMsg(`Priority matrix: ${res.prioApplied} of ${res.matched} prioritized${res.rushN?` (${res.rushN} letter-coded)`:''}; unmapped left blank`);
+  if(res.unmatched.size) logMsg(`Dropped — unresolved subs: ${[...res.unmatched].map(([k,i])=>`${k||'(blank)'} ×${i.count}`).join(', ')}`,'warn');
+  if(res.noCoords.size) logMsg(`Dropped — no coordinates yet: ${[...res.noCoords].map(([k,n])=>`${k} ×${n}`).join(', ')}`,'warn');
+  downloadFile02Res(res);
+  const dropped=res.jobs-res.matched;
+  showToast(`Downloaded ${res.outName} — ${res.matched} of ${res.jobs} jobs${dropped?` (${dropped} dropped, see Log)`:''}`, dropped?'warn':undefined);
+}
 function runConvertRows(header, dataRows, autoDl){
   let res;
   try{ res=buildFile02([header, ...dataRows]); }
   catch(e){ showToast(e.message,'err'); return; }
   lastResult=res; lastGenHeader=header; lastGenRows=dataRows;
-  if(res.unmatched.size){ openUnmatchedModal(res.unmatched, ()=>runConvertRows(header,dataRows,autoDl)); return; }
-  // details to the log; problems as toasts; the file just downloads
-  if(res.schedFor) logMsg(`Scheduled For ${res.schedFor} stamped on every job`);
-  if(res.prioOn) logMsg(`Priority matrix: ${res.prioApplied} of ${res.jobs} prioritized${res.rushN?` (${res.rushN} letter-coded)`:''}; unmapped left blank`);
-  if(res.noCoords.size){
-    const names=[...res.noCoords].map(([k,n])=>`${k} ×${n}`).join(', ');
-    logMsg(`No coordinates yet: ${names}`,'warn');
-    showToast(`${[...res.noCoords.values()].reduce((a,b)=>a+b,0)} job(s) in subs with no coordinates — fix in Settings (see Log)`,'warn');
+  if(res.unmatched.size){
+    // offer resolution once; skipping exports anyway, minus the unresolved jobs
+    openUnmatchedModal(res.unmatched, ()=>runConvertRows(header,dataRows,autoDl), {onSkip:()=>finishExport(res)});
+    return;
   }
-  downloadFile02Res(res);
-  showToast(`Downloaded ${res.outName} — ${res.jobs} jobs, ${res.matched} geocoded`);
+  finishExport(res);
 }
 let lastGenHeader=null, lastGenRows=null;
 
@@ -1851,6 +1857,7 @@ function setFile01(text,name,fromStash){
 /* ============================ SUB RESOLUTION MODAL (fuzzy review cards) ============================ */
 function openUnmatchedModal(unmatched, onResolvedRerun, opts){
   const atImport=!!(opts&&opts.mode==='import');
+  const onSkip=opts&&opts.onSkip;
   const entries=[...unmatched.entries()].map(([raw,info],i)=>({raw,count:info.count,i,resolved:null}));
   const root=document.getElementById('modalRoot');
   root.innerHTML=`
@@ -1860,7 +1867,7 @@ function openUnmatchedModal(unmatched, onResolvedRerun, opts){
         <div class="muted" style="font-size:13px;margin-top:4px"><b>Match</b> routes this import only &middot; <b>Match + alias</b> also saves the spelling so future imports auto-resolve &middot; or pick any sub / create new.</div></div>
       <div class="mb" id="umBody"></div>
       <div class="mf">
-        <button id="umSkip">${atImport?'Resolve later':'Convert with blanks'}</button>
+        <button id="umSkip">${atImport?'Resolve later':'Skip — export without these jobs'}</button>
         <button class="primary" id="umDone" disabled>${atImport?'Done':'Re-convert'}</button>
       </div>
     </div>
@@ -1937,7 +1944,8 @@ function openUnmatchedModal(unmatched, onResolvedRerun, opts){
     });
   }
   document.getElementById('umSkip').addEventListener('click',()=>{ root.innerHTML='';
-    showToast(atImport?'Unresolved subs will get blank coordinates unless fixed before Build':'Converted with blank coordinates for unresolved rows'); });
+    if(onSkip){ onSkip(); return; }
+    if(atImport) showToast('Unresolved subs will be dropped from the export unless fixed before Build'); });
   document.getElementById('umDone').addEventListener('click',()=>{ root.innerHTML=''; renderSubs(); onResolvedRerun();
     if(!atImport) showToast('Re-converted with your matches'); });
 }
@@ -3230,7 +3238,7 @@ window.addEventListener('error',ev=>{
 });
 
 // init
-const APP_VERSION='v3 · 2026-09-02';
+const APP_VERSION='v4 · 2026-09-02';
 document.getElementById('appVer').textContent=APP_VERSION+' · '+REGION;
 // region switcher: each region is its own workspace; a click stores the choice
 // and reloads so the whole app boots into that region's storage
