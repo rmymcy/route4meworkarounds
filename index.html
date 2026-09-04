@@ -964,7 +964,8 @@ svg.leaflet-image-layer.leaflet-interactive path {
         <span id="apiStatus" class="muted" style="font-size:12.5px"></span>
       </div>
       <p class="muted" style="margin:10px 2px 0;font-size:12px">Stored only in this browser (shared by all regions) — never in the file, never sent anywhere except api.route4me.com.
-      The test makes one read-only call to check whether the browser can reach their API directly.</p>
+      If the direct call is blocked, run <b>helper\Start_Helper.bat</b> (in the tool's folder), leave its window open, and re-test —
+      the tool then relays through it automatically.</p>
     </div>
     <div class="card">
       <h2>Subdivisions</h2>
@@ -3142,6 +3143,15 @@ document.getElementById('toastLogBtn').onclick=openToastLog;
    us whether direct browser->API integration is possible (CORS) before any
    real integration is built. */
 const K_APIKEY='r4m_apikey_v1';
+let API_MODE=null; // 'direct' | 'helper' — remembered after a successful call this session
+async function r4mFetch(path, opts){ // path like '/api.v4/....php?api_key=...'
+  if(API_MODE!=='helper'){
+    try{ const r=await fetch('https://api.route4me.com'+path, opts); API_MODE='direct'; return r; }
+    catch(e){ if(API_MODE==='direct') throw e; /* else fall through to the helper */ }
+  }
+  const r=await fetch('http://127.0.0.1:8177/api'+path, opts);
+  API_MODE='helper'; return r;
+}
 (function(){
   const inp=document.getElementById('apiKey');
   try{ inp.value=localStorage.getItem(K_APIKEY)||''; }catch(e){}
@@ -3154,24 +3164,23 @@ const K_APIKEY='r4m_apikey_v1';
     if(!key){ setStat('Enter the API key first','#b45309'); return; }
     try{ localStorage.setItem(K_APIKEY,key); }catch(e){}
     setStat('Testing…');
+    API_MODE=null; // re-probe both routes fresh
     try{
-      const r=await fetch('https://api.route4me.com/api.v4/optimization_problem.php?api_key='+encodeURIComponent(key)+'&limit=1&offset=0',
-        {method:'GET'}); // simple request: no headers, so no CORS preflight
+      const r=await r4mFetch('/api.v4/optimization_problem.php?api_key='+encodeURIComponent(key)+'&limit=1&offset=0',{method:'GET'});
+      const via=API_MODE==='helper'?'via the helper':'directly';
       if(r.status===401||r.status===403){
-        setStat(`Key rejected by Route4Me (HTTP ${r.status}) — the browser CAN reach the API, the key is the problem`,'var(--err)');
+        setStat(`Key rejected by Route4Me (HTTP ${r.status}) — the API is reachable ${via}, the key is the problem`,'var(--err)');
         showToast('API reachable, but the key was rejected — double-check it','err'); return;
       }
-      if(!r.ok){ setStat(`Route4Me answered HTTP ${r.status} — reachable, unexpected reply`, '#b45309');
-        showToast(`API reachable — unexpected HTTP ${r.status} (see Log)`,'warn'); logMsg(`API test: HTTP ${r.status}`,'warn'); return; }
-      const j=await r.json().catch(()=>null);
-      const n=j&&Array.isArray(j.optimizations)?j.optimizations.length:null;
-      setStat('Connected — browser can talk to Route4Me directly'+(n!=null?` (${n?'optimization data visible':'no optimizations yet, auth OK'})`:''),'var(--ok)');
-      showToast('Route4Me API: connected. Direct integration is a go.');
-      logMsg('API test: SUCCESS — direct browser integration possible (no helper needed)');
+      if(!r.ok){ setStat(`Route4Me answered HTTP ${r.status} (${via}) — reachable, unexpected reply`,'#b45309');
+        showToast(`API reachable — unexpected HTTP ${r.status} (see Log)`,'warn'); logMsg(`API test: HTTP ${r.status} ${via}`,'warn'); return; }
+      setStat(`Connected ${via} — Route4Me API is a go`,'var(--ok)');
+      showToast(`Route4Me API: connected ${via}.`);
+      logMsg(`API test: SUCCESS (${via})`);
     }catch(e){
-      setStat('Blocked — the browser could not reach the API (CORS or network). Integration will need the small local helper.','var(--err)');
-      showToast('API blocked from the browser (see Log)','err');
-      logMsg('API test: blocked — '+(e&&e.message||'network/CORS error')+'. Plan B: local helper relay.','err');
+      setStat('Blocked — direct call refused and no helper running. Start helper\\Start_Helper.bat (repo folder), leave its window open, and re-test.','var(--err)');
+      showToast('API blocked — start the Route4Me Helper and re-test (see Log)','err');
+      logMsg('API test: direct call blocked and helper not reachable on 127.0.0.1:8177. Run helper\\Start_Helper.bat and re-test.','err');
     }
   };
 })();
@@ -3289,7 +3298,7 @@ window.addEventListener('error',ev=>{
 });
 
 // init
-const APP_VERSION='v5 · 2026-09-02';
+const APP_VERSION='v6 · 2026-09-02';
 document.getElementById('appVer').textContent=APP_VERSION+' · '+REGION;
 // region switcher: each region is its own workspace; a click stores the choice
 // and reloads so the whole app boots into that region's storage
