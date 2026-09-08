@@ -961,6 +961,10 @@ svg.leaflet-image-layer.leaflet-interactive path {
         the tool works out what each file is.</span>
       </div>
       <div id="kmzStatus" class="note hide" style="margin-top:12px"></div>
+      <div class="row" style="align-items:center;gap:12px;margin-top:14px">
+        <button class="small" id="storageBtn">Storage&hellip;</button>
+        <span class="muted" id="storageLine" style="font-size:12.5px">Checking browser storage&hellip;</span>
+      </div>
     </div>
     <div class="card">
       <h2>Dispatch rules</h2>
@@ -1062,6 +1066,40 @@ function save(key,val){
     return false;
   }
 }
+/* localStorage is ONE ~5 MB bucket shared by every market on this machine, so
+   anything that grows with the day's work must not live there. The raw file01
+   text alone runs to megabytes, and a couple of stashed Sage exports filled the
+   bucket — which is what was rejecting Houston's 424 KB library outright.
+   IndexedDB works on a plain double-clicked file:// page with no launch flags
+   and gives us hundreds of MB, so the big blobs go there and localStorage is
+   left to the small settings it can actually hold. */
+const IDB_NAME='r4m', IDB_STORE='kv';
+let idbP=null;
+function idbOpen(){
+  if(idbP) return idbP;
+  idbP=new Promise((res,rej)=>{
+    let rq; try{ rq=indexedDB.open(IDB_NAME,1); }catch(e){ return rej(e); }
+    rq.onupgradeneeded=()=>{ try{ rq.result.createObjectStore(IDB_STORE); }catch(e){} };
+    rq.onsuccess=()=>res(rq.result);
+    rq.onerror=()=>rej(rq.error||new Error('IndexedDB unavailable'));
+    rq.onblocked=()=>rej(new Error('IndexedDB blocked'));
+  }).catch(e=>{ idbP=null; throw e; });
+  return idbP;
+}
+function idbReq(mode,fn){
+  return idbOpen().then(db=>new Promise((res,rej)=>{
+    let out;
+    const tx=db.transaction(IDB_STORE,mode);
+    const rq=fn(tx.objectStore(IDB_STORE));
+    if(rq) rq.onsuccess=()=>{ out=rq.result; };
+    tx.oncomplete=()=>res(out);                 // resolve on commit, not on the request
+    tx.onerror=()=>rej(tx.error||new Error('write failed'));
+    tx.onabort=()=>rej(tx.error||new Error('write aborted'));
+  }));
+}
+const idbGet=k=>idbReq('readonly',s=>s.get(k));
+const idbSet=(k,v)=>idbReq('readwrite',s=>s.put(v,k));
+const idbDel=k=>idbReq('readwrite',s=>s.delete(k));
 /* Subs are stored compactly: empty nickname/address/aliases are simply left
    out, which cuts a 5,600-sub library roughly in half. */
 function packSubs(list){
@@ -1587,10 +1625,8 @@ function loadFile01ForReview(text,name,restoring){
     ['Description Of Problem','text'],['Status Code','text'],['Priority','text'],
     ['Subdiv Name','text'],['Address 1','text']];
   jobsCols=want.map(([n,t])=>({name:n,i:findCol(jobsHeader,n),type:t})).filter(c=>c.i>=0);
-  // stash full original for the reverse trip — never silently: if storage is full,
-  // clear the KMZ cache and retry; if it still fails, say so.
-  if(!saveLastImport({name,text,when:0}))
-    showToast('Browser storage is full — this file01 works now but won’t be remembered after closing');
+  // stash the full original for the reverse trip (IndexedDB; speaks up if it can't)
+  saveLastImport({name,text,when:0});
   setFile01(text,name,true);   // keep the Bring-back tab's file01 in sync with the latest Send
   // guard: warn if this looks like an already-processed file02 (has Depot/Lat/Long col or depot rows)
   const hasProcCol = ['Depot','Latitude','Longitude'].some(n=>findCol(jobsHeader,n)>=0);
@@ -2718,7 +2754,25 @@ const KMZ_REPORT_BTN=` <button class="small" data-report style="margin-left:8px;
 // migrate pre-v20 cache entries that stored thousands of reference-db pins —
 // they bloat localStorage and can block other saves (e.g. the file01 stash)
 /* save the file01 stash; on a full store, drop the KMZ cache and retry once */
-function saveLastImport(v){ return save(K_LASTIMPORT,v); }
+/* The day's file01, kept so jobs survive a refresh. It is the single biggest
+   thing this tool stores, so it goes to IndexedDB and never near the shared
+   5 MB bucket. LAST_IMPORT mirrors it in memory for anything reading it now. */
+let LAST_IMPORT=null;
+function saveLastImport(v){
+  LAST_IMPORT=v;
+  idbSet(K_LASTIMPORT,v)
+    .then(()=>{ try{ localStorage.removeItem(K_LASTIMPORT); }catch(e){} })
+    .catch(err=>{
+      const txt=String(v&&v.text||'');
+      if(txt.length>600000){          // no IndexedDB: never let one CSV eat the bucket
+        showToast("Today's file works now, but it's too big for this browser to remember after you close it.",'warn');
+        logMsg(`file01 stash skipped: ${Math.round(txt.length/1024)} KB, IndexedDB unavailable (${(err&&err.name)||err})`,'warn');
+        return;
+      }
+      if(!save(K_LASTIMPORT,v))
+        showToast('Browser storage is full — this file01 works now but won’t be remembered after closing','warn');
+    });
+}
 
 /* Modern folder scan (Chrome/Edge): we crawl the tree ourselves — in parallel —
    with live progress, and only ever open .kmz/.kml. */
@@ -2997,8 +3051,23 @@ document.getElementById('genBtn').onclick=()=>{
 };
 
 // Bring back (file03 -> file04)
-(function(){
-  const stash=load(K_LASTIMPORT,null);
+(async function(){
+  /* First: get every market's stashed file01 out of the shared 5 MB bucket.
+     This is the space that was starving the subdivision libraries, and it is
+     reclaimed the moment an existing user opens this build. */
+  for(const p of ['r4m_','r4m_hou_','r4m_dfw_','r4m_asa_']){
+    const k=p+'lastimport_v1';
+    let raw=null; try{ raw=localStorage.getItem(k); }catch(e){}
+    if(!raw) continue;
+    let v=null; try{ v=JSON.parse(raw); }catch(e){ try{ localStorage.removeItem(k); }catch(e2){} continue; }
+    try{ await idbSet(k,v); localStorage.removeItem(k);
+         logMsg(`Moved ${p.replace(/_$/,'')||'FL'} file01 (${Math.round(raw.length/1024)} KB) out of browser settings storage`); }
+    catch(e){ /* no IndexedDB here — leave it where it is rather than lose it */ }
+  }
+  let stash=null;
+  try{ stash=await idbGet(K_LASTIMPORT); }catch(e){}
+  if(!stash) stash=load(K_LASTIMPORT,null);      // fallback path when IndexedDB is unavailable
+  LAST_IMPORT=stash||null;
   if(stash && stash.text){
     setFile01(stash.text, stash.name||'file01.csv', true);
     // the day's jobs survive a refresh: restore the trim table quietly
@@ -3012,10 +3081,61 @@ document.getElementById('genBtn').onclick=()=>{
       }
     }catch(e){ console.error(e); }
   }
+  refreshStorageLine();
   // reopen the page that was in use
   const t0=load(K_UITAB,'dispatch');
   if(t0!=='dispatch'){ const el=document.querySelector(`.tab[data-tab="${t0}"]`); if(el) el.click(); }
 })();
+/* ===================== STORAGE READOUT =====================
+   When a library "wipes itself" the real story is almost always in here, so
+   make it something a manager can read out loud over the phone. */
+const REGION_PREFIXES={'r4m_':'FL','r4m_hou_':'HOU','r4m_dfw_':'DFW','r4m_asa_':'ASA'};
+function lsUsedBytes(){
+  let n=0; try{ for(const k of Object.keys(localStorage)) n+=k.length+(localStorage.getItem(k)||'').length; }catch(e){}
+  return n*2;                                  // localStorage counts UTF-16 code units
+}
+const kb=b=>b<1024?b+' B':Math.round(b/1024)+' KB';
+async function storageReport(){
+  const rows=[];
+  try{
+    for(const k of Object.keys(localStorage).sort()){
+      const bytes=(k.length+(localStorage.getItem(k)||'').length)*2;
+      const pre=Object.keys(REGION_PREFIXES).filter(p=>k.startsWith(p)).sort((a,b)=>b.length-a.length)[0];
+      rows.push({key:k,bytes,market:pre?REGION_PREFIXES[pre]:'—'});
+    }
+  }catch(e){}
+  const used=lsUsedBytes();
+  let idbOk=false, idbNote='';
+  try{ await idbOpen(); idbOk=true; }catch(e){ idbNote=(e&&e.name)||String(e); }
+  let quota=0, usage=0;
+  try{ const est=await navigator.storage.estimate(); quota=est.quota||0; usage=est.usage||0; }catch(e){}
+  return {rows,used,idbOk,idbNote,quota,usage};
+}
+async function refreshStorageLine(){
+  const el=document.getElementById('storageLine'); if(!el) return;
+  const r=await storageReport();
+  el.textContent=`Settings storage ${kb(r.used)} of about 5 MB. `+
+    (r.idbOk ? `Job files are held separately${r.quota?` (about ${Math.round(r.quota/1048576)} MB available)`:''}.`
+             : `IndexedDB is unavailable here — job files fall back to the small bucket.`);
+}
+document.getElementById('storageBtn').onclick=async()=>{
+  const r=await storageReport();
+  const big=r.rows.slice().sort((a,b)=>b.bytes-a.bytes);
+  const root=document.getElementById('modalRoot2');
+  root.innerHTML=`<div class="backdrop"><div class="modal" style="max-width:620px"><div class="mh"><h3>Storage</h3>
+    <div class="muted" style="font-size:12px;margin-top:4px">The browser gives this tool one small bucket for settings and libraries
+      (about 5 MB, shared by all four markets) and a much larger one for the day's job files.</div></div>
+    <div class="mb">
+      <p style="margin:0 0 10px"><b>Settings &amp; libraries:</b> ${kb(r.used)} used of about 5 MB.<br>
+      <b>Job files:</b> ${r.idbOk?`stored separately${r.quota?`, about ${Math.round(r.quota/1048576)} MB available`:''}`:`<span style="color:var(--err)">unavailable (${r.idbNote}) — falling back to the small bucket</span>`}.</p>
+      <div class="tablewrap"><table>
+        <thead><tr><th>What</th><th style="width:70px">Market</th><th style="width:80px">Size</th></tr></thead>
+        <tbody>${big.map(x=>`<tr><td style="font-family:ui-monospace,monospace;font-size:12px">${x.key}</td><td>${x.market}</td><td>${kb(x.bytes)}</td></tr>`).join('')||'<tr><td colspan="3" class="muted">Nothing stored yet.</td></tr>'}</tbody>
+      </table></div>
+    </div>
+    <div class="mf"><button id="stgClose">Close</button></div></div></div>`;
+  root.querySelector('#stgClose').onclick=()=>root.innerHTML='';
+};
 const drop3=document.getElementById('drop3'), file3In=document.getElementById('file3');
 document.getElementById('pick3Btn').onclick=()=>file3In.click();
 file3In.onchange=e=>{ if(e.target.files.length) read3([...e.target.files]); e.target.value=''; };
@@ -3326,7 +3446,7 @@ window.addEventListener('error',ev=>{
 });
 
 // init
-const APP_VERSION='v15 · 2026-09-08';
+const APP_VERSION='v16 · 2026-09-08';
 document.getElementById('appVer').textContent=APP_VERSION+' · '+REGION;
 // region switcher: each region is its own workspace; a click stores the choice
 // and reloads so the whole app boots into that region's storage
