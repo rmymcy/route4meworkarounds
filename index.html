@@ -936,6 +936,9 @@ svg.leaflet-image-layer.leaflet-interactive path {
           Schedule for <input type="date" id="schedFor" style="padding:5px 8px;font:inherit;font-size:12.5px;border:1px solid var(--line);border-radius:8px"></label>
         <button class="small" id="prioBtn" title="priority by task type × due date — writes a Priority column into the Route4Me file">Priority&hellip;</button>
         <button class="small" id="colsBtn" title="choose which columns go to Route4Me (core: Alias, Lat, Long, Svc Job Num)">Columns&hellip;</button>
+        <label class="muted" style="font-size:12px;display:flex;align-items:center;gap:6px"
+          title="On: append each working crew's start as a Depot row, for the one-upload depot run (Option 2). Off: no depots — for territories, which set their own starts.">
+          <input type="checkbox" id="depotToggle"> Crew depots</label>
         <button class="small" id="crewMapBtn" title="see which crew each job would fall to, and drag starts to change it">&#128506; Crew map</button>
         <button class="primary" id="genBtn">Build Route4Me file &rarr;</button>
       </div>
@@ -1657,12 +1660,13 @@ function buildFile02(rows){
   if(prioOn){ plan.push({k:'prio'}); plan.push({k:'color'}); }
   const extras=loadFile02Cols();
   for(let c=0;c<header.length;c++) if(extras.has(norm(header[c]))) addOrig(c); // chosen extras, original order
-  function reshape(cells, latVal, lngVal, schedVal, aliasVal, prioVal, colorVal){
+  if(DEPOTS_ON) plan.push({k:'depot'});          // last column, as it always was
+  function reshape(cells, latVal, lngVal, schedVal, aliasVal, prioVal, colorVal, depotVal){
     return plan.map(s=> s.k==='orig' ? (cells[s.i]==null?'':cells[s.i])
       : s.k==='lat' ? latVal : s.k==='lng' ? lngVal : s.k==='alias' ? aliasVal
-      : s.k==='prio' ? prioVal : s.k==='color' ? colorVal : schedVal);
+      : s.k==='prio' ? prioVal : s.k==='color' ? colorVal : s.k==='depot' ? (depotVal||'') : schedVal);
   }
-  out.push(reshape(header, LAT_H, LNG_H, 'Scheduled For', 'Alias', 'Priority', 'Color')); // header row (orig specs yield padded header names)
+  out.push(reshape(header, LAT_H, LNG_H, 'Scheduled For', 'Alias', 'Priority', 'Color', DEPOT_H)); // header row
 
   const unmatched=new Map(); // erpName -> {count}
   const noCoords=new Map();  // matched sub name -> count (sub exists but has no lat/long yet)
@@ -1691,7 +1695,7 @@ function buildFile02(rows){
       if(mv!=null){ prio=mv.v; color=prioColor(mv.v); prioApplied++; }
       // unmapped/undated jobs get NO priority — Sage's numbers mean nothing to Route4Me
     }
-    out.push(reshape(cells, lat, lng, schedFor, aliasFor(cells, m.sub?m.sub.name:''), prio, color));
+    out.push(reshape(cells, lat, lng, schedFor, aliasFor(cells, m.sub?m.sub.name:''), prio, color, ''));
   }
   // same task in the same sub -> identical aliases; number them so every stop
   // in Route4Me is distinguishable: "FORM SURVEY - Westview (1)", "(2)", ...
@@ -1703,8 +1707,23 @@ function buildFile02(rows){
     if(aliasCount.get(a)>1){ const n=(aliasSeen.get(a)||0)+1; aliasSeen.set(a,n); out[r][iAlOut]=`${a} (${n})`; }
   }
 
+  /* Depot rows last, as the original did: everything blank but the alias
+     ("<crew> Home"), the start coordinates, and Depot = 1. No Svc Job Num, so
+     the reverse trip skips straight past them when file03 comes back.
+     Starts moved on the crew map count — that's the point of moving them — and
+     the caller says so out loud, since an unsaved drag is easy to forget. */
+  let depots=0, depotsMoved=0;
+  if(DEPOTS_ON){
+    for(const s of crewStarts()){
+      const cells=new Array(header.length).fill('');
+      out.push(reshape(cells, fmtCoord(s.lat), fmtCoord(s.lng), '', `${s.name} Home`, '', '', '1'));
+      depots++; if(s.moved) depotsMoved++;
+    }
+  }
+
   const outName=`Route4Me Upload ${REGION} ${todayStamp()}.csv`;
-  return {rows:out, outName, schedFor, prioOn, prioApplied, rushN, unmatched, noCoords, matched, jobs};
+  return {rows:out, outName, schedFor, prioOn, prioApplied, rushN, unmatched, noCoords, matched, jobs,
+          depots, depotsMoved};
 }
 function isActive(cw){ return cw.active!==false; } // default on unless explicitly false
 function todayStamp(){ const d=new Date(); const p=n=>String(n).padStart(2,'0'); return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`; }
@@ -1857,6 +1876,11 @@ function statusChipHtml(code){
    it approximates well. SEQUENCING — stop order, drive times — is where Route4Me
    is genuinely clever and unpredictable, and we don't attempt it. Route4Me still
    makes the real call; file03 is the ground truth to check this against. */
+const K_DEPOTS=RK+'depots_v1';
+/* Option 2 appends each working crew's start as a Depot row, the way the very
+   first version did. Territories set their own starts, so Option 1 leaves it
+   off and ships orders only. */
+let DEPOTS_ON=load(K_DEPOTS,false)===true;
 let PREVIEW_STARTS={};      // crew index -> {lat,lng} dragged this session (not saved until asked)
 let CREW_MAP_ON=false, crewMapInstance=null, crewJobLayer=null, crewPinLayer=null;
 function crewColor(n){ return `hsl(${Math.round(n*137.508)%360} 72% 45%)`; }
@@ -2054,9 +2078,14 @@ function finishExport(res){
   if(res.prioOn) logMsg(`Priority matrix: ${res.prioApplied} of ${res.matched} prioritized${res.rushN?` (${res.rushN} letter-coded)`:''}; unmapped left blank`);
   if(res.unmatched.size) logMsg(`Dropped — unresolved subs: ${[...res.unmatched].map(([k,i])=>`${k||'(blank)'} ×${i.count}`).join(', ')}`,'warn');
   if(res.noCoords.size) logMsg(`Dropped — no coordinates yet: ${[...res.noCoords].map(([k,n])=>`${k} ×${n}`).join(', ')}`,'warn');
+  if(res.depots) logMsg(`Depot rows appended: ${res.depots} crew start(s)${res.depotsMoved?`, ${res.depotsMoved} moved on the crew map`:''}`);
   downloadFile02Res(res);
   const dropped=res.jobs-res.matched;
-  showToast(`Downloaded ${res.outName} — ${res.matched} of ${res.jobs} jobs${dropped?` (${dropped} dropped, see Log)`:''}`, dropped?'warn':undefined);
+  showToast(`Downloaded ${res.outName} — ${res.matched} of ${res.jobs} jobs`+
+    (res.depots?` + ${res.depots} depot${res.depots===1?'':'s'}`:'')+
+    (dropped?` (${dropped} dropped, see Log)`:''), dropped?'warn':undefined);
+  // an unsaved drag is easy to forget, and it just shipped
+  if(res.depotsMoved) showToast(`${res.depotsMoved} start(s) came from the map and aren't saved — "Save moved starts" to keep them.`,'warn');
 }
 function runConvertRows(header, dataRows, autoDl){
   let res;
@@ -3671,6 +3700,11 @@ document.getElementById('crewMapBtn').onclick=()=>{
   toggleCrewMap();
 };
 document.getElementById('cmCap').oninput=()=>renderCrewMap(false);
+const depotEl=document.getElementById('depotToggle');
+depotEl.checked=DEPOTS_ON;
+depotEl.onchange=()=>{ DEPOTS_ON=depotEl.checked; save(K_DEPOTS,DEPOTS_ON);
+  showToast(DEPOTS_ON?'Crew depots ON — each working crew is appended as a Depot row'
+                     :'Crew depots OFF — orders only, for territories'); };
 document.getElementById('cmReset').onclick=()=>{
   if(!Object.keys(PREVIEW_STARTS).length){ showToast('Nothing moved'); return; }
   PREVIEW_STARTS={}; renderCrewMap(true); showToast('Back to each crew’s saved start');
@@ -3809,7 +3843,7 @@ window.addEventListener('error',ev=>{
 });
 
 // init
-const APP_VERSION='v20 · 2026-09-08';
+const APP_VERSION='v21 · 2026-09-08';
 document.getElementById('appVer').textContent=APP_VERSION+' · '+REGION;
 // region switcher: each region is its own workspace; a click stores the choice
 // and reloads so the whole app boots into that region's storage
