@@ -1098,6 +1098,14 @@ function idbReq(mode,fn){
   }));
 }
 const idbGet=k=>idbReq('readonly',s=>s.get(k));
+/* Read a stored library from wherever it actually lives: IndexedDB normally,
+   the old localStorage copy when a browser refuses IndexedDB or when a market
+   has not been opened since upgrading. */
+async function storedLibrary(key){
+  let v=null; try{ v=await idbGet(key); }catch(e){}
+  if(!Array.isArray(v)){ try{ const raw=JSON.parse(localStorage.getItem(key)||'null'); if(Array.isArray(raw)) v=raw; }catch(e){} }
+  return Array.isArray(v)?v:[];
+}
 const idbSet=(k,v)=>idbReq('readwrite',s=>s.put(v,k));
 const idbDel=k=>idbReq('readwrite',s=>s.delete(k));
 /* Subs are stored compactly: empty nickname/address/aliases are simply left
@@ -1156,35 +1164,91 @@ function crewAddLoc(c,label,lat,lng){
    is open on the same market with stale state, when a load silently fell back
    to the seed, or when any handler runs before an import finishes. The write is
    refused, the good copy stays on disk, and the operator is told out loud. */
+/* The libraries live in IndexedDB. localStorage is one ~5 MB bucket shared by
+   every market AND by every other local page on this machine, so what is left
+   for us is not ours to control — Houston's 424 KB import kept being rejected
+   outright by a bucket something else had already filled. IndexedDB gets its
+   own database and hundreds of MB, which is what a 5,600-sub library has always
+   needed. localStorage stays for the small settings, and remains the fallback
+   if a browser ever refuses IndexedDB.
+
+   STORED_N mirrors what we believe is on disk so the wipe guards below can stay
+   synchronous even though the write itself is not. */
+const STORED_N={};
+let HYDRATED=false, DB_MODE='localStorage';
 function storedCount(key){
+  if(key in STORED_N) return STORED_N[key];
   try{ const v=JSON.parse(localStorage.getItem(key)||'[]'); return Array.isArray(v)?v.length:0; }catch(e){ return 0; }
 }
-function guardedSave(key,arr,packed,label){
-  const have=arr.length, had=storedCount(key);
-  if(had>0 && have===0){
+/* Write a library. Prefers IndexedDB; falls back to localStorage and says so
+   loudly if neither will take it. Verification happens after the commit. */
+function dbPut(key,packed,label,count){
+  return idbSet(key,packed).then(()=>{
+    DB_MODE='IndexedDB';
+    try{ localStorage.removeItem(key); }catch(e){}   // the old copy is dead weight in a full bucket
+    return idbGet(key).then(v=>{
+      const after=Array.isArray(v)?v.length:0;
+      if(after!==count){
+        showToast(`Save did not stick — the browser stored ${after} of ${count} ${label}. Export a backup now.`,'err');
+        logMsg(`VERIFY FAILED for ${key}: wrote ${count}, read back ${after}`,'err');
+        return false;
+      }
+      return true;
+    });
+  }).catch(err=>{
+    logMsg(`IndexedDB unavailable (${(err&&err.name)||err}) — falling back to browser settings storage`,'warn');
+    if(!save(key,packed)){
+      showToast(`Could NOT save ${count} ${label}. This browser is out of room and won't take it — export a backup before closing.`,'err');
+      return false;
+    }
+    return true;
+  });
+}
+function guardedSave(key,arr,packed,label,opt){
+  const have=arr.length, had=storedCount(key), force=!!(opt&&opt.force);
+  if(!HYDRATED && !force){        // never write over a library we haven't read yet
+    logMsg(`Ignored a ${label} save that arrived before the library finished loading`,'warn');
+    return false;
+  }
+  if(!force && had>0 && have===0){
     showToast(`Refused to erase ${had} ${label} — this page is out of date. Reload before making changes.`,'err');
     logMsg(`BLOCKED a wipe: tried to save 0 ${label} over ${had} stored (${key}). Nothing was changed.`,'err');
     return false;
   }
-  if(had>=25 && have<had*0.5){
+  if(!force && had>=25 && have<had*0.5){
     if(!confirm(`This will cut ${label} from ${had} to ${have}. Continue?`)){
       logMsg(`Cancelled a large ${label} reduction (${had} -> ${have})`,'warn');
       return false;
     }
   }
-  const ok=save(key,packed);
-  if(ok && have>0){                              // verify it really landed
-    const after=storedCount(key);
-    if(after!==have){
-      showToast(`Save did not stick — the browser stored ${after} of ${have} ${label}. Export a backup now.`,'err');
-      logMsg(`VERIFY FAILED for ${key}: wrote ${have}, read back ${after}`,'err');
-      return false;
-    }
-  }
-  return ok;
+  STORED_N[key]=have;
+  dbPut(key,packed,label,have);   // reports its own failures
+  return true;
 }
-function persistSubs(){ return guardedSave(K_SUBS,SUBS,packSubs(SUBS),'subdivisions'); }
-function persistCrews(){ return guardedSave(K_CREWS,CREWS,CREWS,'crews'); }
+function persistSubs(opt){ return guardedSave(K_SUBS,SUBS,packSubs(SUBS),'subdivisions',opt); }
+function persistCrews(opt){ return guardedSave(K_CREWS,CREWS,CREWS,'crews',opt); }
+/* Read this market's libraries out of IndexedDB, migrating any copy still
+   sitting in localStorage on the way. Until this lands, writes are refused. */
+async function hydrateLibraries(){
+  try{
+    let s=await idbGet(K_SUBS), c=await idbGet(K_CREWS);
+    DB_MODE='IndexedDB';
+    if(!Array.isArray(s) && SUBS.length){ await idbSet(K_SUBS,packSubs(SUBS)); s=packSubs(SUBS);
+      logMsg(`Moved ${SUBS.length} ${REGION} subdivisions into IndexedDB`); }
+    if(!Array.isArray(c) && CREWS.length){ await idbSet(K_CREWS,CREWS); c=CREWS;
+      logMsg(`Moved ${CREWS.length} ${REGION} crews into IndexedDB`); }
+    if(Array.isArray(s)) SUBS=unpackSubs(s);
+    if(Array.isArray(c)) CREWS=c;
+    // the libraries are safe in IndexedDB now; stop paying for them in the small bucket
+    try{ localStorage.removeItem(K_SUBS); localStorage.removeItem(K_CREWS); }catch(e){}
+  }catch(err){
+    DB_MODE='localStorage';
+    logMsg(`IndexedDB unavailable (${(err&&err.name)||err}) — using browser settings storage`,'warn');
+  }
+  STORED_N[K_SUBS]=SUBS.length; STORED_N[K_CREWS]=CREWS.length;
+  HYDRATED=true;
+  try{ renderSubs(); renderCrews(); }catch(e){}
+}
 /* Another tab writing this market's library is the classic way a good copy gets
    clobbered; notice it and say so instead of letting it pass unseen. */
 window.addEventListener('storage',e=>{
@@ -3064,6 +3128,7 @@ document.getElementById('genBtn').onclick=()=>{
          logMsg(`Moved ${p.replace(/_$/,'')||'FL'} file01 (${Math.round(raw.length/1024)} KB) out of browser settings storage`); }
     catch(e){ /* no IndexedDB here — leave it where it is rather than lose it */ }
   }
+  await hydrateLibraries();     // libraries first: nothing may be written until they are read
   let stash=null;
   try{ stash=await idbGet(K_LASTIMPORT); }catch(e){}
   if(!stash) stash=load(K_LASTIMPORT,null);      // fallback path when IndexedDB is unavailable
@@ -3107,16 +3172,26 @@ async function storageReport(){
   const used=lsUsedBytes();
   let idbOk=false, idbNote='';
   try{ await idbOpen(); idbOk=true; }catch(e){ idbNote=(e&&e.name)||String(e); }
+  // what each market actually holds, read from the db rather than assumed
+  const libs=[];
+  for(const [pre,name] of Object.entries(REGION_PREFIXES)){
+    const one={market:name,subs:0,crews:0,jobKB:0};
+    for(const what of ['subs','crews']) one[what]=(await storedLibrary(pre+what+'_v1')).length;
+    let j=null; try{ j=await idbGet(pre+'lastimport_v1'); }catch(e){}
+    one.jobKB=j&&j.text?Math.round(j.text.length/1024):0;
+    libs.push(one);
+  }
   let quota=0, usage=0;
   try{ const est=await navigator.storage.estimate(); quota=est.quota||0; usage=est.usage||0; }catch(e){}
-  return {rows,used,idbOk,idbNote,quota,usage};
+  return {rows,used,idbOk,idbNote,quota,usage,libs};
 }
 async function refreshStorageLine(){
   const el=document.getElementById('storageLine'); if(!el) return;
   const r=await storageReport();
-  el.textContent=`Settings storage ${kb(r.used)} of about 5 MB. `+
-    (r.idbOk ? `Job files are held separately${r.quota?` (about ${Math.round(r.quota/1048576)} MB available)`:''}.`
-             : `IndexedDB is unavailable here — job files fall back to the small bucket.`);
+  const mine=r.libs.filter(x=>x.subs||x.crews).map(x=>`${x.market} ${x.subs}`).join(' · ');
+  el.textContent=r.idbOk
+    ? `Libraries in IndexedDB${r.quota?` (about ${Math.round(r.quota/1048576)} MB available)`:''}${mine?` — ${mine}`:''}. Settings ${kb(r.used)}.`
+    : `IndexedDB is unavailable here — everything falls back to one ~5 MB bucket, currently ${kb(r.used)}.`;
 }
 document.getElementById('storageBtn').onclick=async()=>{
   const r=await storageReport();
@@ -3126,8 +3201,13 @@ document.getElementById('storageBtn').onclick=async()=>{
     <div class="muted" style="font-size:12px;margin-top:4px">The browser gives this tool one small bucket for settings and libraries
       (about 5 MB, shared by all four markets) and a much larger one for the day's job files.</div></div>
     <div class="mb">
-      <p style="margin:0 0 10px"><b>Settings &amp; libraries:</b> ${kb(r.used)} used of about 5 MB.<br>
-      <b>Job files:</b> ${r.idbOk?`stored separately${r.quota?`, about ${Math.round(r.quota/1048576)} MB available`:''}`:`<span style="color:var(--err)">unavailable (${r.idbNote}) — falling back to the small bucket</span>`}.</p>
+      <p style="margin:0 0 10px"><b>Libraries &amp; job files:</b> ${r.idbOk?`IndexedDB${r.quota?`, about ${Math.round(r.quota/1048576)} MB available`:''}`:`<span style="color:var(--err)">IndexedDB unavailable (${r.idbNote}) — falling back to the small bucket</span>`}.<br>
+      <b>Settings:</b> ${kb(r.used)} of about 5 MB.</p>
+      <div class="tablewrap" style="margin-bottom:14px"><table>
+        <thead><tr><th>Market</th><th style="width:90px">Subdivisions</th><th style="width:70px">Crews</th><th style="width:90px">Job file</th></tr></thead>
+        <tbody>${r.libs.map(x=>`<tr><td>${x.market}</td><td>${x.subs||'—'}</td><td>${x.crews||'—'}</td><td>${x.jobKB?x.jobKB+' KB':'—'}</td></tr>`).join('')}</tbody>
+      </table></div>
+      <div class="muted" style="font-size:12px;margin-bottom:6px">Still in the small settings bucket:</div>
       <div class="tablewrap"><table>
         <thead><tr><th>What</th><th style="width:70px">Market</th><th style="width:80px">Size</th></tr></thead>
         <tbody>${big.map(x=>`<tr><td style="font-family:ui-monospace,monospace;font-size:12px">${x.key}</td><td>${x.market}</td><td>${kb(x.bytes)}</td></tr>`).join('')||'<tr><td colspan="3" class="muted">Nothing stored yet.</td></tr>'}</tbody>
@@ -3187,7 +3267,7 @@ async function routeImportFiles(files){
   const sheets=list.filter(f=>/\.(xlsx|csv)$/i.test(f.name));
   const other=list.filter(f=>!json.includes(f)&&!sheets.includes(f));
   document.getElementById('modalRoot').innerHTML='';
-  for(const f of json){ const text=await f.text(); importSetupJson(text,f.name); }
+  for(const f of json){ const text=await f.text(); await importSetupJson(text,f.name); }
   for(const f of sheets){
     const kind=await sniffSheet(f);
     if(kind==='crews') await processCrewsFile(f);
@@ -3241,25 +3321,37 @@ document.getElementById('exportSubs').onclick=()=>download('subdivisions.json',J
 /* Merge helpers shared by the JSON importers. A file may carry subs, crews or
    both, and each record (or the file itself) may name its market. */
 function regionKey(r,what){ return (r==='FL'?'r4m_':'r4m_'+r.toLowerCase()+'_')+what+'_v1'; }
-function readRegion(r,what,live){
+/* Another market's library lives in IndexedDB too, so reading and writing it is
+   asynchronous — a market not currently on screen is read straight from the db. */
+async function readRegion(r,what,live){
   if(r===REGION) return live;
-  try{ const v=JSON.parse(localStorage.getItem(regionKey(r,what))||'[]');
-       if(!Array.isArray(v)) return [];
-       return what==='subs' ? unpackSubs(v) : v; }catch(e){ return []; }
+  const v=await storedLibrary(regionKey(r,what));
+  return what==='subs' ? unpackSubs(v) : v;
 }
-function writeRegion(r,what,arr,live){
-  const key=regionKey(r,what);
-  const ok=save(key, what==='subs'?packSubs(arr):arr);
-  const after=storedCount(key);
-  if(!ok || after!==arr.length){
+async function writeRegion(r,what,arr,live){
+  const key=regionKey(r,what), packed=what==='subs'?packSubs(arr):arr;
+  let ok=false, after=0;
+  try{
+    await idbSet(key,packed);
+    try{ localStorage.removeItem(key); }catch(e){}
+    const back=await idbGet(key);
+    after=Array.isArray(back)?back.length:0;
+    ok=(after===arr.length);
+  }catch(err){                                  // no IndexedDB here — try the small bucket
+    ok=save(key,packed);
+    try{ const raw=JSON.parse(localStorage.getItem(key)||'[]'); after=Array.isArray(raw)?raw.length:0; }catch(e){}
+    ok=ok&&after===arr.length;
+  }
+  if(!ok){
     IMPORT_PROBLEMS.push(`${r} ${what}: kept ${after} of ${arr.length} — browser storage rejected the rest`);
     logMsg(`IMPORT NOT SAVED for ${r} ${what}: wrote ${arr.length}, stored ${after}`,'err');
   }
+  STORED_N[key]=after;
   if(r===REGION){ if(what==='subs'){ SUBS=arr; renderSubs(); } else { CREWS=arr; renderCrews(); } }
 }
 let IMPORT_PROBLEMS=[];
-function mergeSubsInto(r,incoming){
-  const cur=readRegion(r,'subs',SUBS).slice();
+async function mergeSubsInto(r,incoming){
+  const cur=(await readRegion(r,'subs',SUBS)).slice();
   const by=new Map(cur.map(s=>[norm(s.name),s]));
   let added=0, filled=0;
   for(const raw of incoming){
@@ -3271,11 +3363,11 @@ function mergeSubsInto(r,incoming){
              if(!hit.address&&s.address) hit.address=s.address; }
     else { cur.push(s); by.set(norm(s.name),s); added++; }
   }
-  writeRegion(r,'subs',cur,SUBS);
+  await writeRegion(r,'subs',cur,SUBS);
   return {added,filled,total:cur.length};
 }
-function mergeCrewsInto(r,incoming){
-  const cur=readRegion(r,'crews',CREWS).slice();
+async function mergeCrewsInto(r,incoming){
+  const cur=(await readRegion(r,'crews',CREWS)).slice();
   let added=0, updated=0, locs=0;
   for(const raw of incoming){
     const first=String(raw.name||raw.first||'').trim(); if(!first) continue;
@@ -3297,10 +3389,10 @@ function mergeCrewsInto(r,incoming){
       added++;
     }
   }
-  writeRegion(r,'crews',cur,CREWS);
+  await writeRegion(r,'crews',cur,CREWS);
   return {added,updated,locs,total:cur.length};
 }
-function importSetupJson(text,fname){
+async function importSetupJson(text,fname){
   try{
     const data=JSON.parse(text);
     const known=Object.keys(REGION_DEFS);
@@ -3323,7 +3415,7 @@ function importSetupJson(text,fname){
     } else throw 0;
     const anyTagged = bundle || subsIn.some(pick) || crewsIn.some(pick);
     if(!anyTagged && crewsIn.length && !subsIn.length){
-      const r=mergeCrewsInto(REGION,crewsIn);
+      const r=await mergeCrewsInto(REGION,crewsIn);
       showToast(`Crews imported into ${REGION}: ${r.added} added, ${r.updated} updated${r.locs?`, ${r.locs} start location(s)`:''}`);
       return;
     }
@@ -3342,10 +3434,10 @@ function importSetupJson(text,fname){
     const parts=[];
     for(const r of Object.keys(groups)){
       const bits=[];
-      if(groups[r].subs.length){ const s=mergeSubsInto(r,groups[r].subs);
+      if(groups[r].subs.length){ const s=await mergeSubsInto(r,groups[r].subs);
         bits.push(`${s.added} sub${s.added===1?'':'s'}`);
         logMsg(`Import → ${r} subs: ${s.added} added${s.filled?`, ${s.filled} coordinates filled`:''}, ${s.total} total`); }
-      if(groups[r].crews.length){ const c=mergeCrewsInto(r,groups[r].crews);
+      if(groups[r].crews.length){ const c=await mergeCrewsInto(r,groups[r].crews);
         bits.push(`${c.added} crew${c.added===1?'':'s'}`);
         logMsg(`Import → ${r} crews: ${c.added} added, ${c.updated} updated${c.locs?`, ${c.locs} start location(s)`:''}, ${c.total} total`); }
       parts.push(`${r} +${bits.join(' / ')}`);
@@ -3357,7 +3449,7 @@ function importSetupJson(text,fname){
 }
 document.getElementById('importSubs').onchange=e=>{ const f=e.target.files[0]; if(!f)return;
   const rd=new FileReader(); rd.onload=()=>importSetupJson(rd.result,f.name); rd.readAsText(f); e.target.value=''; };
-document.getElementById('resetSubs').onclick=()=>{ if(confirm('Reset the subdivision library to the original seed? Your changes will be lost.')){ SUBS=JSON.parse(JSON.stringify(REGION_SUBS_SEED)); persistSubs(); renderSubs(); showToast('Reset'); } };
+document.getElementById('resetSubs').onclick=()=>{ if(confirm('Reset the subdivision library to the original seed? Your changes will be lost.')){ SUBS=JSON.parse(JSON.stringify(REGION_SUBS_SEED)); persistSubs({force:true}); renderSubs(); showToast('Reset'); } };
 document.getElementById('subsMapBtn').onclick=()=>toggleSubsMap();
 document.getElementById('subsFoldBtn').onclick=()=>{
   SUBS_FOLDERS=!SUBS_FOLDERS; save(K_SUBFOLD,SUBS_FOLDERS);
@@ -3420,7 +3512,7 @@ document.getElementById('crewSearch').oninput=renderCrews;
 document.getElementById('addCrewBtn').onclick=()=>editCrewModal(-1);
 document.getElementById('exportCrews').onclick=()=>download('crews.json',JSON.stringify(CREWS,null,2));
 document.getElementById('importCrews').onchange=e=>{ const f=e.target.files[0]; if(!f)return; const rd=new FileReader(); rd.onload=()=>{ try{const d=JSON.parse(rd.result); if(!Array.isArray(d))throw 0; CREWS=d.map(x=>({name:x.name||'',last:x.last||'',code:x.code||'',email:x.email||'',lat:x.lat,lng:x.lng,active:x.active!==false})); persistCrews(); renderCrews(); showToast('Imported '+CREWS.length+' crews'); }catch(err){ showToast('Invalid JSON'); } }; rd.readAsText(f); e.target.value=''; };
-document.getElementById('resetCrews').onclick=()=>{ if(confirm('Reset the crew library to the original seed?')){ CREWS=JSON.parse(JSON.stringify(REGION_CREWS_SEED)); persistCrews(); renderCrews(); showToast('Reset'); } };
+document.getElementById('resetCrews').onclick=()=>{ if(confirm('Reset the crew library to the original seed?')){ CREWS=JSON.parse(JSON.stringify(REGION_CREWS_SEED)); persistCrews({force:true}); renderCrews(); showToast('Reset'); } };
 document.getElementById('crewBody').addEventListener('change',e=>{
   const t=e.target;
   if(t.dataset.togglecrew!=null){ const i=+t.dataset.togglecrew; CREWS[i].active=t.checked; persistCrews(); renderCrews(); }
@@ -3446,7 +3538,7 @@ window.addEventListener('error',ev=>{
 });
 
 // init
-const APP_VERSION='v16 · 2026-09-08';
+const APP_VERSION='v17 · 2026-09-08';
 document.getElementById('appVer').textContent=APP_VERSION+' · '+REGION;
 // region switcher: each region is its own workspace; a click stores the choice
 // and reloads so the whole app boots into that region's storage
