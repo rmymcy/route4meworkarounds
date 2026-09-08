@@ -828,6 +828,12 @@ svg.leaflet-image-layer.leaflet-interactive path {
     align-items:center;justify-content:center;cursor:pointer;font-size:13px;padding:0;color:#475467}
   .icon-btn:hover{border-color:var(--brand);color:var(--brand);background:#f8fafc}
   .icon-btn.danger:hover{border-color:var(--err);color:var(--err);background:var(--err-bg)}
+  .sub-folder{display:flex;align-items:center;gap:9px;background:#f1f5f9;border:1px solid var(--line);border-radius:8px;
+    padding:8px 12px;margin-bottom:5px;cursor:pointer;font-size:13px;user-select:none}
+  .sub-folder:hover{border-color:var(--brand)}
+  .sub-folder.open{background:var(--chip)}
+  .sub-folder .fchev{color:var(--muted);font-size:11px;width:10px}
+  .sub-card2.nested{margin-left:22px;border-left:3px solid var(--chip)}
   #subsMapWrap{height:66vh;min-height:480px;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:#eaeaed}
   /* ---- sub review cards (fuzzy import resolution) ---- */
   .review-card{background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--warn);border-radius:8px;
@@ -995,6 +1001,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
         <input type="search" class="grow" id="subSearch" placeholder="Filter&hellip;">
         <button class="small" id="subsMapBtn">&#128205; Map</button>
         <button class="small" id="subsSortBtn" title="toggle list order: alphabetical or grouped by geography">Sort: A&ndash;Z</button>
+        <button class="small" id="subsFoldBtn" title="group phases and sections of one subdivision under a folder">Folders</button>
         <button class="primary small" id="addSubBtn">+ Add</button>
         <input type="file" id="kmzFile" accept=".kmz,.kml" multiple class="hide">
         <input type="file" id="kmzDir" webkitdirectory directory multiple class="hide">
@@ -1044,8 +1051,47 @@ const REGION_SUBS_SEED = REGION==='FL' ? SUBS_SEED : [];
 const REGION_CREWS_SEED = REGION==='FL' ? CREWS_SEED : [];
 const K_SUBS=RK+'subs_v1', K_CREWS=RK+'crews_v1', K_LASTIMPORT=RK+'lastimport_v1';
 function load(key,seed){ try{const v=localStorage.getItem(key); if(v) return JSON.parse(v);}catch(e){} return JSON.parse(JSON.stringify(seed)); }
-function save(key,val){ localStorage.setItem(key,JSON.stringify(val)); }
-let SUBS = load(K_SUBS,REGION_SUBS_SEED);
+/* Browsers cap this origin at a few MB and every region shares it, so a big
+   library can push a save over the edge. Never lose data silently: make room
+   by dropping the disposable KMZ scan cache, retry, and if it still won't fit,
+   say so loudly instead of throwing into whatever called us. */
+function save(key,val){
+  const s=JSON.stringify(val);
+  try{ localStorage.setItem(key,s); return true; }
+  catch(e){
+    try{
+      localStorage.removeItem((typeof K_KMZCACHE==='string'?K_KMZCACHE:'r4m_kmzcache_v1'));
+      if(typeof KMZCACHE!=='undefined') KMZCACHE={};
+      localStorage.setItem(key,s);
+      showToast('Storage was full — cleared the KMZ scan cache to make room','warn');
+      return true;
+    }catch(e2){
+      try{ showToast("Browser storage is full — that change could NOT be saved. Trim a library or export and reset one.",'err');
+           logMsg(`SAVE FAILED for ${key} (${Math.round(s.length/1024)} KB) — storage full`,'err'); }catch(e3){}
+      return false;
+    }
+  }
+}
+/* Subs are stored compactly: empty nickname/address/aliases are simply left
+   out, which cuts a 5,600-sub library roughly in half. */
+function packSubs(list){
+  return list.map(s=>{
+    const o={n:s.name};
+    if(s.lat!=null&&s.lat!=='') { o.a=+s.lat; o.o=+s.lng; }
+    if(s.nickname) o.k=s.nickname;
+    if(s.address) o.d=s.address;
+    if(Array.isArray(s.aliases)&&s.aliases.length) o.x=s.aliases;
+    return o;
+  });
+}
+function unpackSubs(list){
+  if(!Array.isArray(list)) return [];
+  return list.map(s=> s && s.n!==undefined
+    ? {name:s.n,nickname:s.k||'',address:s.d||'',lat:s.a==null?null:s.a,lng:s.o==null?null:s.o,aliases:s.x||[]}
+    : {name:(s&&s.name)||'',nickname:(s&&s.nickname)||'',address:(s&&s.address)||'',
+       lat:s&&s.lat!=null?s.lat:null,lng:s&&s.lng!=null?s.lng:null,aliases:(s&&s.aliases)||[]});
+}
+let SUBS = unpackSubs(load(K_SUBS,REGION_SUBS_SEED));
 let CREWS = load(K_CREWS,REGION_CREWS_SEED);
 // migrate crews saved before last-name / servicer-code existed
 (function migrateCrews(){
@@ -1077,7 +1123,7 @@ function crewAddLoc(c,label,lat,lng){
   if(L.length===1) crewSetLoc(c,0);
   return true;
 }
-function persistSubs(){ save(K_SUBS,SUBS); }
+function persistSubs(){ save(K_SUBS,packSubs(SUBS)); }
 function persistCrews(){ save(K_CREWS,CREWS); }
 
 // territories were removed — clean up their old storage keys in every region
@@ -2026,6 +2072,22 @@ function mortonKey(lat,lng){
   for(let i=15;i>=0;i--) m=m*4+((a>>i&1)*2+(b>>i&1));
   return m;
 }
+/* Group phases/sections of one subdivision under a folder — display only.
+   "Elyson 12", "Elyson 13A" -> folder "Elyson". Records are never merged;
+   every phase keeps its own row, coordinates and aliases. */
+const FAM_TOK=/\s*[-–—,:]?\s*\(?\s*(?:(?:ph(?:ase)?|sec(?:tion)?|sect|unit|u|pod|pb|pbn|blk|block|tr|parcel|p|s)\s*-?\s*\d+[a-z]?(?:\.\d+)?|\d+\s*(?:ph(?:ase)?|sec(?:tion)?|s|p|u)\s*\d*[a-z]?|[a-z]?\d+[a-z]?(?:\.\d+)?)\s*\)?\s*$/i;
+function subFamily(name){
+  let s=String(name||'').trim();
+  for(let i=0;i<4;i++){
+    const t=s.replace(FAM_TOK,'').replace(/[\s\-–—,:(]+$/,'').trim();
+    if(t===s || t.length<4) break;
+    s=t;
+  }
+  return s;
+}
+const K_SUBFOLD=RK+'subfolders_v1';
+let SUBS_FOLDERS=load(K_SUBFOLD,true)!==false;
+const OPEN_FAMS=new Set();
 function subsFilterList(){
   const q=norm(document.getElementById('subSearch').value);
   const list=SUBS.map((s,i)=>({s,i}))
@@ -2047,14 +2109,46 @@ const SUBS_RENDER_CAP=400; // huge libraries: render the first N, filter to narr
 function renderSubs(){
   const body=document.getElementById('subsList');
   const {list}=subsFilterList();
-  const capped=list.length>SUBS_RENDER_CAP;
-  const shown=capped?list.slice(0,SUBS_RENDER_CAP):list;
   const head=document.getElementById('subsGridHead');
   head.className='subs-grid-head';
   head.innerHTML=`<div></div><div>Name</div><div>Nickname</div><div>Address</div><div>Lat / Long</div><div>Aliases</div><div style="text-align:right">Actions</div>`;
-  body.innerHTML=shown.map(({s,i})=>{
+  const q0=norm(document.getElementById('subSearch').value);
+  let entries=[], capped=false, shown=list, totalTop=list.length;
+  if(SUBS_FOLDERS){
+    const fams=new Map();
+    for(const it of list){
+      const key=norm(subFamily(it.s.name))||norm(it.s.name);
+      if(!fams.has(key)) fams.set(key,{label:subFamily(it.s.name)||it.s.name,items:[]});
+      fams.get(key).items.push(it);
+    }
+    for(const [key,f] of fams) entries.push(f.items.length>1?{folder:true,key,label:f.label,items:f.items}:{folder:false,...f.items[0]});
+    totalTop=entries.length;
+    // folder rows are cheap, so a grouped library can show far more at once
+    const cap=Math.max(SUBS_RENDER_CAP,1600);
+    capped=entries.length>cap;
+    entries=capped?entries.slice(0,cap):entries;
+    if(q0) entries.forEach(e=>{ if(e.folder) OPEN_FAMS.add(e.key); });   // searching reveals the matches
+    shown=[];
+    for(const e of entries){
+      if(!e.folder){ shown.push(e); continue; }
+      const open=OPEN_FAMS.has(e.key);
+      const geo=e.items.filter(x=>subHasGeo(x.s)).length;
+      shown.push({folderRow:true,key:e.key,label:e.label,n:e.items.length,geo,open});
+      if(open) for(const it of e.items) shown.push({...it,inFolder:true});
+    }
+  } else {
+    capped=list.length>SUBS_RENDER_CAP;
+    shown=capped?list.slice(0,SUBS_RENDER_CAP):list;
+  }
+  body.innerHTML=shown.map(row=>{
+    if(row.folderRow) return `<div class="sub-folder${row.open?' open':''}" data-fam="${esc(row.key)}">
+      <span class="fchev">${row.open?'&#9662;':'&#9656;'}</span>
+      <b>${esc(row.label)}</b>
+      <span class="muted" style="font-size:12px">${row.n} phase${row.n===1?'':'s'}${row.geo<row.n?` · <span style="color:var(--warn)">${row.n-row.geo} without coordinates</span>`:''}</span>
+    </div>`;
+    const {s,i}=row;
     const geo=subHasGeo(s);
-    return `<div class="sub-card2" data-i="${i}">
+    return `<div class="sub-card2${row.inFolder?' nested':''}" data-i="${i}">
       <div style="display:flex;justify-content:center"><span class="dot ${geo?'dot-green':'dot-amber'}" title="${geo?'has coordinates':'no coordinates yet'}"></span></div>
       <input type="text" value="${esc(s.name)}" data-f="name" data-i="${i}" title="rename">
       <input type="text" value="${esc(s.nickname||'')}" data-f="nickname" data-i="${i}" placeholder="nickname&hellip;">
@@ -2072,7 +2166,7 @@ function renderSubs(){
       </div>
     </div>`;}).join('') || `<div class="muted" style="text-align:center;padding:36px">${SUBS.length?'no subs match the filter':'no subs yet — add one or import'}</div>`;
   const withGeo=SUBS.filter(subHasGeo).length;
-  document.getElementById('subCount').textContent=`${SUBS.length} subdivisions · ${withGeo} with coordinates${SUBS.length-withGeo?` · ${SUBS.length-withGeo} without`:''}${capped?` · showing first ${SUBS_RENDER_CAP} of ${list.length} — filter to narrow`:''}`;
+  document.getElementById('subCount').textContent=`${SUBS.length} subdivisions · ${withGeo} with coordinates${SUBS.length-withGeo?` · ${SUBS.length-withGeo} without`:''}${SUBS_FOLDERS&&list.length!==totalTop?` · ${totalTop} folders/rows`:''}${capped?` · showing first ${SUBS_FOLDERS?1600:SUBS_RENDER_CAP} of ${totalTop} — filter to narrow`:''}`;
   try{ renderSubsMap(false); }catch(e){ console.error(e); } // a map hiccup must never break the list
 }
 
@@ -3282,11 +3376,12 @@ document.getElementById('exportSubs').onclick=()=>download('subdivisions.json',J
 function regionKey(r,what){ return (r==='FL'?'r4m_':'r4m_'+r.toLowerCase()+'_')+what+'_v1'; }
 function readRegion(r,what,live){
   if(r===REGION) return live;
-  try{ const v=JSON.parse(localStorage.getItem(regionKey(r,what))||'[]'); return Array.isArray(v)?v:[]; }catch(e){ return []; }
+  try{ const v=JSON.parse(localStorage.getItem(regionKey(r,what))||'[]');
+       if(!Array.isArray(v)) return [];
+       return what==='subs' ? unpackSubs(v) : v; }catch(e){ return []; }
 }
 function writeRegion(r,what,arr,live){
-  try{ localStorage.setItem(regionKey(r,what),JSON.stringify(arr)); }
-  catch(e){ showToast(`Storage full — ${r} ${what} not saved`,'err'); }
+  save(regionKey(r,what), what==='subs'?packSubs(arr):arr);
   if(r===REGION){ if(what==='subs'){ SUBS=arr; renderSubs(); } else { CREWS=arr; renderCrews(); } }
 }
 function mergeSubsInto(r,incoming){
@@ -3385,6 +3480,67 @@ function importSetupJson(text,fname){
 }
 document.getElementById('importSubs').onchange=e=>{ const f=e.target.files[0]; if(!f)return;
   const rd=new FileReader(); rd.onload=()=>importSetupJson(rd.result,f.name); rd.readAsText(f); e.target.value=''; };
+document.getElementById('resetSubs').onclick=()=>{ if(confirm('Reset the subdivision library to the original seed? Your changes will be lost.')){ SUBS=JSON.parse(JSON.stringify(REGION_SUBS_SEED)); persistSubs(); renderSubs(); showToast('Reset'); } };
+document.getElementById('subsMapBtn').onclick=()=>toggleSubsMap();
+document.getElementById('subsFoldBtn').onclick=()=>{
+  SUBS_FOLDERS=!SUBS_FOLDERS; save(K_SUBFOLD,SUBS_FOLDERS);
+  document.getElementById('subsFoldBtn').classList.toggle('primary',SUBS_FOLDERS);
+  OPEN_FAMS.clear(); renderSubs();
+  showToast(SUBS_FOLDERS?'Phases grouped into folders':'Flat list — every phase on its own row');
+};
+document.getElementById('subsSortBtn').onclick=()=>{
+  SUBS_SORT=SUBS_SORT==='az'?'geo':'az';
+  save(K_SUBSORT,SUBS_SORT);
+  document.getElementById('subsSortBtn').innerHTML='Sort: '+(SUBS_SORT==='geo'?'Region':'A&ndash;Z');
+document.getElementById('subsFoldBtn').classList.toggle('primary',SUBS_FOLDERS);
+  renderSubs();
+};
+document.getElementById('subsSortBtn').innerHTML='Sort: '+(SUBS_SORT==='geo'?'Region':'A&ndash;Z');
+const subsListEl=document.getElementById('subsList');
+subsListEl.addEventListener('change',e=>{
+  const t=e.target;
+  if(t.dataset.f==null||t.dataset.i==null) return;
+  const s=SUBS[+t.dataset.i]; if(!s) return;
+  const v=t.value.trim();
+  if(t.dataset.f==='name'){
+    if(!v){ t.value=s.name; return; }
+    if(norm(v)!==norm(s.name) && SUBS.some(x=>x!==s&&norm(x.name)===norm(v))){ showToast('That name already exists'); t.value=s.name; return; }
+    s.name=v;
+  } else s[t.dataset.f]=v;
+  persistSubs(); renderSubs();
+});
+subsListEl.addEventListener('click',e=>{
+  const fold=e.target.closest('[data-fam]');
+  if(fold){ const k=fold.dataset.fam; if(OPEN_FAMS.has(k)) OPEN_FAMS.delete(k); else OPEN_FAMS.add(k); renderSubs(); return; }
+  const t=e.target.closest('[data-geo],[data-adel],[data-aadd],[data-map],[data-del]');
+  if(!t) return;
+  if(t.dataset.geo!=null) return openGeoEditor(+t.dataset.geo);
+  if(t.dataset.map!=null) return focusSubOnMap(+t.dataset.map);
+  if(t.dataset.del!=null){ const i=+t.dataset.del; if(confirm('Delete "'+SUBS[i].name+'"?')){ SUBS.splice(i,1); persistSubs(); renderSubs(); } return; }
+  if(t.dataset.adel!=null){ const i=+t.dataset.adel, ai=+t.dataset.ai; SUBS[i].aliases.splice(ai,1); persistSubs(); renderSubs(); return; }
+  if(t.dataset.aadd!=null){
+    const i=+t.dataset.aadd;
+    const input=document.createElement('input');
+    input.type='text'; input.className='alias-input'; input.placeholder='new alias…';
+    t.replaceWith(input); input.focus();
+    let committed=false; // Enter triggers blur too — commit exactly once
+    const commit=()=>{
+      if(committed) return; committed=true;
+      const val=input.value.trim();
+      if(val){ const s=SUBS[i];
+        if(s){ if(!Array.isArray(s.aliases)) s.aliases=[];
+          if(!s.aliases.some(a=>norm(a)===norm(val))){ s.aliases.push(val); persistSubs(); } } }
+      renderSubs();
+    };
+    input.addEventListener('keydown',ev=>{ if(ev.key==='Enter'){ ev.preventDefault(); commit(); } else if(ev.key==='Escape'){ committed=true; renderSubs(); } });
+    input.addEventListener('blur',commit);
+    return;
+  }
+});
+
+// crews
+document.getElementById('crewSearch').oninput=renderCrews;
+document.getElementById('addCrewBtn').onclick=()=>editCrewModal(-1);
 document.getElementById('exportCrews').onclick=()=>download('crews.json',JSON.stringify(CREWS,null,2));
 document.getElementById('importCrews').onchange=e=>{ const f=e.target.files[0]; if(!f)return; const rd=new FileReader(); rd.onload=()=>{ try{const d=JSON.parse(rd.result); if(!Array.isArray(d))throw 0; CREWS=d.map(x=>({name:x.name||'',last:x.last||'',code:x.code||'',email:x.email||'',lat:x.lat,lng:x.lng,active:x.active!==false})); persistCrews(); renderCrews(); showToast('Imported '+CREWS.length+' crews'); }catch(err){ showToast('Invalid JSON'); } }; rd.readAsText(f); e.target.value=''; };
 document.getElementById('resetCrews').onclick=()=>{ if(confirm('Reset the crew library to the original seed?')){ CREWS=JSON.parse(JSON.stringify(REGION_CREWS_SEED)); persistCrews(); renderCrews(); showToast('Reset'); } };
@@ -3413,7 +3569,7 @@ window.addEventListener('error',ev=>{
 });
 
 // init
-const APP_VERSION='v12 · 2026-09-08';
+const APP_VERSION='v13 · 2026-09-08';
 document.getElementById('appVer').textContent=APP_VERSION+' · '+REGION;
 // region switcher: each region is its own workspace; a click stores the choice
 // and reloads so the whole app boots into that region's storage
