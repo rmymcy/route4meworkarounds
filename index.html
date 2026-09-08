@@ -936,13 +936,38 @@ svg.leaflet-image-layer.leaflet-interactive path {
           Schedule for <input type="date" id="schedFor" style="padding:5px 8px;font:inherit;font-size:12.5px;border:1px solid var(--line);border-radius:8px"></label>
         <button class="small" id="prioBtn" title="priority by task type × due date — writes a Priority column into the Route4Me file">Priority&hellip;</button>
         <button class="small" id="colsBtn" title="choose which columns go to Route4Me (core: Alias, Lat, Long, Svc Job Num)">Columns&hellip;</button>
+        <button class="small" id="crewMapBtn" title="see which crew each job would fall to, and drag starts to change it">&#128506; Crew map</button>
         <button class="primary" id="genBtn">Build Route4Me file &rarr;</button>
       </div>
-      <div class="tablewrap" style="max-height:62vh">
+      <div class="tablewrap" id="jobsTableWrap" style="max-height:62vh">
         <table id="jobsTable" title="Click a header to sort · Shift+click selects a range · Ctrl/Cmd+click toggles">
           <thead><tr id="jobsHead"></tr></thead>
           <tbody id="jobsBody"></tbody>
         </table>
+      </div>
+      <div id="crewMapPanel" class="hide">
+        <div class="note" style="margin-bottom:10px">
+          <b>Option 2 — depots.</b> One upload with every crew's home as a depot; Route4Me assigns the jobs.
+          This is our estimate of that assignment, so you can drag a start and see who picks up what
+          <b>before</b> you upload. Route4Me makes the final call &mdash; check it against file03 when it comes back.
+        </div>
+        <div class="toolbar" style="margin-bottom:10px">
+          <label class="muted" style="font-size:12px;display:flex;align-items:center;gap:6px"
+            title="Route4Me's max stops per route. Leave blank to let it assign freely — which is how a crew ends up with nothing.">
+            Max stops per crew <input type="number" min="1" id="cmCap" style="width:80px;padding:5px 8px;font:inherit;font-size:12.5px;border:1px solid var(--line);border-radius:8px"></label>
+          <span class="muted grow" id="cmSummary"></span>
+          <button class="small" id="cmReset">Reset starts</button>
+          <button class="small primary" id="cmSave">Save moved starts</button>
+        </div>
+        <div style="display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap">
+          <div id="crewMapWrap" style="flex:1 1 520px;min-width:320px;height:60vh;border:1px solid var(--line);border-radius:10px"></div>
+          <div style="flex:0 1 320px;min-width:260px">
+            <div class="tablewrap" style="max-height:60vh">
+              <table><thead><tr><th>Crew</th><th style="width:60px">Jobs</th><th style="width:70px">Avg mi</th></tr></thead>
+              <tbody id="cmCrewBody"></tbody></table>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -1816,6 +1841,142 @@ function statusChipHtml(code){
   const v=String(code||'').trim(); if(!v) return '';
   const cls={cff:'job-status-cff','if':'job-status-if',fv:'job-status-fv',fe:'job-status-fe'}[norm(v)]||'';
   return `<span class="job-status ${cls}">${esc(v)}</span>`;
+}
+/* ==================== OPTION 2: CREW MAP (depot preview) ====================
+   Territories are Option 1 and stay the default: they decide who gets what, but
+   their start is welded in place, so a crew who moves for a week can't be
+   re-pointed quickly. Option 2 is the other trade — every crew's home goes in as
+   a depot on ONE upload, and Route4Me does the assigning. That's what used to
+   scatter jobs onto crews you'd avoid, because nobody could see it coming.
+
+   This is the seeing. We estimate the assignment from the crew starts, draw it,
+   and let a start be dragged so the manager can shape the outcome before
+   uploading rather than discovering it afterwards.
+
+   What we can and cannot predict: assignment is driven by proximity and load, so
+   it approximates well. SEQUENCING — stop order, drive times — is where Route4Me
+   is genuinely clever and unpredictable, and we don't attempt it. Route4Me still
+   makes the real call; file03 is the ground truth to check this against. */
+let PREVIEW_STARTS={};      // crew index -> {lat,lng} dragged this session (not saved until asked)
+let CREW_MAP_ON=false, crewMapInstance=null, crewJobLayer=null, crewPinLayer=null;
+function crewColor(n){ return `hsl(${Math.round(n*137.508)%360} 72% 45%)`; }
+
+/* Every job that has coordinates, resolved the same way the export resolves them. */
+function jobPoints(){
+  if(!jobsHeader) return [];
+  const iSub=findCol(jobsHeader,'Subdiv Name'); if(iSub<0) return [];
+  const iSec=findCol(jobsHeader,'Section'), iAddr=findCol(jobsHeader,'Address 1'),
+        iTask=findCol(jobsHeader,'Description Of Problem');
+  const idx=buildIndex(), out=[];
+  for(const r of jobsRows){
+    if(r.removed) continue;
+    const m=matchSub(r.cells[iSub]!=null?r.cells[iSub]:'', idx, iSec>=0&&r.cells[iSec]!=null?r.cells[iSec]:'');
+    if(!m.sub) continue;
+    const lat=+m.sub.lat, lng=+m.sub.lng;
+    if(!isFinite(lat)||!isFinite(lng)) continue;
+    out.push({id:r.id, lat, lng, sub:m.sub.name,
+      addr:iAddr>=0?String(r.cells[iAddr]||'').trim():'', task:iTask>=0?String(r.cells[iTask]||'').trim():''});
+  }
+  return out;
+}
+/* Active crews with a usable start — the dragged position if there is one. */
+function crewStarts(){
+  const out=[];
+  CREWS.forEach((c,i)=>{
+    if(!isActive(c)) return;
+    const mv=PREVIEW_STARTS[i];
+    const lat=mv?mv.lat:+c.lat, lng=mv?mv.lng:+c.lng;
+    if(!isFinite(lat)||!isFinite(lng)) return;
+    out.push({i, lat, lng, moved:!!mv, color:crewColor(out.length),
+      name:`${c.name||''} ${c.last||''}`.trim()||c.code||`Crew ${i+1}`, code:c.code||''});
+  });
+  return out;
+}
+/* Nearest-start assignment, optionally capped the way Route4Me caps stops.
+   Jobs are placed in order of how strongly they prefer one crew over the next
+   (their "regret"), so the ones with a clear owner claim it before the
+   toss-ups do — which is roughly how a solver settles them too. */
+function previewAssign(pts, starts, cap){
+  const byCrew=new Map(); starts.forEach(s=>byCrew.set(s.i,[]));
+  const of=new Map();
+  if(!starts.length) return {byCrew, of};
+  const limit=cap>0?cap:Infinity;
+  const ranked=pts.map(p=>{
+    const ds=starts.map(s=>({i:s.i,d:haversineMi(p.lat,p.lng,s.lat,s.lng)})).sort((a,b)=>a.d-b.d);
+    return {p, ds, regret: ds.length>1 ? ds[1].d-ds[0].d : Infinity};
+  }).sort((a,b)=>b.regret-a.regret);
+  for(const r of ranked){
+    let pick=r.ds.find(c=>byCrew.get(c.i).length<limit) || r.ds[0];
+    byCrew.get(pick.i).push(r.p.id);
+    of.set(r.p.id,{crew:pick.i, mi:pick.d});
+  }
+  return {byCrew, of};
+}
+function toggleCrewMap(){
+  CREW_MAP_ON=!CREW_MAP_ON;
+  document.getElementById('crewMapPanel').classList.toggle('hide',!CREW_MAP_ON);
+  document.getElementById('jobsTableWrap').classList.toggle('hide',CREW_MAP_ON);
+  document.getElementById('crewMapBtn').classList.toggle('primary',CREW_MAP_ON);
+  if(CREW_MAP_ON) renderCrewMap(true);
+}
+function renderCrewMap(fit){
+  if(!CREW_MAP_ON) return;
+  const wrap=document.getElementById('crewMapWrap');
+  if(!crewMapInstance && !wrap.offsetWidth){ setTimeout(()=>renderCrewMap(fit),120); return; }
+  if(!crewMapInstance){
+    crewMapInstance=L.map('crewMapWrap',{zoomControl:true}).setView(REGION_CENTER,8);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'© OpenStreetMap',maxZoom:19}).addTo(crewMapInstance);
+    crewJobLayer=L.layerGroup().addTo(crewMapInstance);
+    crewPinLayer=L.layerGroup().addTo(crewMapInstance);
+  }
+  setTimeout(()=>crewMapInstance.invalidateSize(),50);
+  const pts=jobPoints(), starts=crewStarts();
+  const capEl=document.getElementById('cmCap');
+  const cap=capEl&&capEl.value?Math.max(1,+capEl.value):0;
+  const {byCrew,of}=previewAssign(pts,starts,cap);
+  const colorOf=new Map(starts.map(s=>[s.i,s.color]));
+
+  crewJobLayer.clearLayers();
+  for(const p of pts){
+    const a=of.get(p.id);
+    const col=a?colorOf.get(a.crew):'#9aa4b2';
+    L.circleMarker([p.lat,p.lng],{radius:4,color:col,weight:1,fillColor:col,fillOpacity:.75})
+      .bindTooltip(`${esc(p.task||'job')} — ${esc(p.sub)}${p.addr?'<br>'+esc(p.addr):''}`+
+        (a?`<br><b>${esc((starts.find(s=>s.i===a.crew)||{}).name||'')}</b> · ${a.mi.toFixed(1)} mi`:''),{sticky:true})
+      .addTo(crewJobLayer);
+  }
+  crewPinLayer.clearLayers();
+  for(const s of starts){
+    const icon=L.divIcon({className:'',iconSize:[18,18],iconAnchor:[9,9],
+      html:`<div style="width:18px;height:18px;border-radius:50%;background:${s.color};border:3px solid #fff;box-shadow:0 0 0 1.5px ${s.color},0 1px 4px rgba(0,0,0,.4)"></div>`});
+    const mk=L.marker([s.lat,s.lng],{icon,draggable:true,zIndexOffset:1000})
+      .bindTooltip(`<b>${esc(s.name)}</b>${s.code?' · '+esc(s.code):''}<br>${byCrew.get(s.i).length} job(s)${s.moved?'<br><i>moved</i>':''}<br><i>drag to try a different start</i>`,{sticky:true})
+      .addTo(crewPinLayer);
+    mk.on('dragend',e=>{ const ll=e.target.getLatLng();
+      PREVIEW_STARTS[s.i]={lat:+ll.lat.toFixed(6),lng:+ll.lng.toFixed(6)};
+      renderCrewMap(false); });
+  }
+  if(fit){
+    const all=pts.map(p=>[p.lat,p.lng]).concat(starts.map(s=>[s.lat,s.lng]));
+    if(all.length) crewMapInstance.fitBounds(all,{padding:[40,40]});
+  }
+  renderCrewSummary(starts,byCrew,of,pts.length);
+}
+function renderCrewSummary(starts,byCrew,of,total){
+  const rows=starts.map(s=>{
+    const ids=byCrew.get(s.i);
+    const mi=ids.length?ids.reduce((a,id)=>a+of.get(id).mi,0)/ids.length:0;
+    return {s, n:ids.length, mi};
+  }).sort((a,b)=>b.n-a.n);
+  document.getElementById('cmCrewBody').innerHTML=rows.map(r=>`<tr>
+    <td><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${r.s.color};margin-right:7px"></span>${esc(r.s.name)}${r.s.moved?' <span class="badge sec">moved</span>':''}</td>
+    <td>${r.n?r.n:'<span class="badge warn">0</span>'}</td><td>${r.n?r.mi.toFixed(1):'—'}</td></tr>`).join('')
+    || '<tr><td colspan="3" class="muted">No active crews with a start location.</td></tr>';
+  const starved=rows.filter(r=>!r.n).length;
+  const moved=rows.filter(r=>r.s.moved).length;
+  document.getElementById('cmSummary').textContent=
+    `${total} job(s) across ${rows.length} crew(s)`+
+    (starved?` · ${starved} would get nothing`:'')+(moved?` · ${moved} start(s) moved`:'');
 }
 const TASK_HUES=new Map(); // per-import golden-angle hues (set in loadFile01ForReview)
 function taskColor(t){
@@ -3487,6 +3648,36 @@ async function importSetupJson(text,fname){
 document.getElementById('importSubs').onchange=e=>{ const f=e.target.files[0]; if(!f)return;
   const rd=new FileReader(); rd.onload=()=>importSetupJson(rd.result,f.name); rd.readAsText(f); e.target.value=''; };
 document.getElementById('resetSubs').onclick=()=>{ if(confirm('Reset the subdivision library to the original seed? Your changes will be lost.')){ SUBS=JSON.parse(JSON.stringify(REGION_SUBS_SEED)); persistSubs({force:true}); renderSubs(); showToast('Reset'); } };
+document.getElementById('crewMapBtn').onclick=()=>{
+  if(!jobsHeader){ showToast('Load a Sage export first'); return; }
+  toggleCrewMap();
+};
+document.getElementById('cmCap').oninput=()=>renderCrewMap(false);
+document.getElementById('cmReset').onclick=()=>{
+  if(!Object.keys(PREVIEW_STARTS).length){ showToast('Nothing moved'); return; }
+  PREVIEW_STARTS={}; renderCrewMap(true); showToast('Back to each crew’s saved start');
+};
+/* A dragged pin is a what-if until it's asked for: saving adds it as another
+   named start on that crew, so their real home is still there in the dropdown. */
+document.getElementById('cmSave').onclick=()=>{
+  const moved=Object.keys(PREVIEW_STARTS);
+  if(!moved.length){ showToast('Drag a start first'); return; }
+  const label=(prompt('Name for these start locations (e.g. "Frisco cluster")','Map start')||'').trim();
+  if(!label) return;
+  let n=0;
+  for(const k of moved){
+    const c=CREWS[+k]; if(!c) continue;
+    const p=PREVIEW_STARTS[k];
+    const L=crewLocs(c);
+    const hit=L.findIndex(x=>String(x.label)===label);
+    if(hit>=0){ L[hit].lat=p.lat; L[hit].lng=p.lng; crewSetLoc(c,hit); }
+    else { L.push({label,lat:p.lat,lng:p.lng}); crewSetLoc(c,L.length-1); }
+    n++;
+  }
+  persistCrews(); renderCrews();
+  PREVIEW_STARTS={}; renderCrewMap(false);
+  showToast(`Saved "${label}" as the start for ${n} crew(s)`);
+};
 document.getElementById('subsMapBtn').onclick=()=>toggleSubsMap();
 document.getElementById('subsFoldBtn').onclick=()=>{
   SUBS_FOLDERS=!SUBS_FOLDERS; save(K_SUBFOLD,SUBS_FOLDERS);
@@ -3575,7 +3766,7 @@ window.addEventListener('error',ev=>{
 });
 
 // init
-const APP_VERSION='v18 · 2026-09-08';
+const APP_VERSION='v19 · 2026-09-08';
 document.getElementById('appVer').textContent=APP_VERSION+' · '+REGION;
 // region switcher: each region is its own workspace; a click stores the choice
 // and reloads so the whole app boots into that region's storage
