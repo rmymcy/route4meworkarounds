@@ -724,7 +724,8 @@ svg.leaflet-image-layer.leaflet-interactive path {
   .chip .x:hover{color:var(--err)}
   .pin{color:var(--muted);font-variant-numeric:tabular-nums;font-size:12px}
   .badge{font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px}
-  .badge.ok{background:#ecfdf3;color:var(--ok)}
+  .badge.sec{background:var(--chip);color:var(--muted);font-weight:600}
+.badge.ok{background:#ecfdf3;color:var(--ok)}
   .badge.warn{background:var(--warn-bg);color:var(--warn)}
   .badge.err{background:var(--err-bg);color:var(--err)}
   .switch{position:relative;display:inline-block;width:38px;height:22px;cursor:pointer}
@@ -1284,8 +1285,34 @@ function buildIndex(){
    Cleared whenever a new file01 is loaded — it's per-import-run, like dispatch. */
 const ONE_TIME_SUB=new Map();
 
-/* returns {sub, how} or {sub:null, how} */
-function matchSub(value, idx){
+/* Sage splits one place across two columns — "Subdiv Name" and "Section" — while
+   the library has a separate zone, with its own centroid, for every phase and
+   section ("Easton Park 10", "Woodlands at Medina Hills U2A Ph3"). Matching on the
+   name alone collapses them: every Easton Park job becomes a single decision, and
+   Section 5's jobs land on Section 2's coordinates. These rebuild the full place
+   name so each section is matched, resolved and geocoded on its own. */
+function subKeyForms(name, section){
+  const n=String(name==null?'':name).trim();
+  const s=String(section==null?'':section).trim();
+  if(!n||!s) return [n];
+  if(norm(n).endsWith(' '+norm(s))) return [n];        // the name already carries it
+  const tight=s.replace(/\s+/g,'');                     // "Ph 3" is also written "Ph3"
+  return tight!==s ? [n+' '+s, n+' '+tight] : [n+' '+s];
+}
+function subKeyOf(name, section){ return subKeyForms(name,section)[0]; }
+
+/* returns {sub, how} or {sub:null, how}. With a section, the fuller name is tried
+   first and the bare name is the fallback, so a library with no section detail
+   still matches exactly as it did before. */
+function matchSub(value, idx, section){
+  const bare=String(value==null?'':value).trim();
+  if(section===undefined) return matchSubName(value, idx);
+  const tried=subKeyForms(value, section);
+  if(!tried.some(f=>norm(f)===norm(bare))) tried.push(bare);
+  for(const f of tried){ const r=matchSubName(f, idx); if(r.sub) return r; }
+  return {sub:null, how: norm(bare)?'miss':'empty'};
+}
+function matchSubName(value, idx){
   const n=norm(value);
   if(!n) return {sub:null,how:'empty'};
   if(idx.byName.has(n)) return {sub:idx.byName.get(n),how:'name'};
@@ -1534,6 +1561,7 @@ function buildFile02(rows){
   const header=rows[0];
   const iAddr=findCol(header,'Address 1');
   const iSub=findCol(header,'Subdiv Name');
+  const iSec=findCol(header,'Section');   // optional: splits phases/sections apart
   if(iAddr<0) throw new Error('Could not find an "Address 1" column in this file.');
   if(iSub<0) throw new Error('Could not find a "Subdiv Name" column in this file.');
   if(findCol(header,'Svc Job Num')<0) throw new Error('Could not find a "Svc Job Num" column — it\'s required to match the Route4Me export back to Sage.');
@@ -1561,7 +1589,7 @@ function buildFile02(rows){
   // Uses the full library sub name when matched (Sage's Subdiv Name is truncated).
   const iTask=findCol(header,'Description Of Problem');
   const aliasFor=(cells,subName)=>[iTask>=0?String(cells[iTask]||'').trim():'',
-    String(subName||cells[iSub]||'').trim(),
+    String(subName||subKeyOf(cells[iSub],iSec>=0?cells[iSec]:'')||'').trim(),
     String(cells[iAddr]||'').trim()].filter(Boolean).join(' - ');
   // priority matrix (two clocks): hottest of Due-clock and Received-clock values
   const PRIOMX=loadPrioMx();
@@ -1618,7 +1646,8 @@ function buildFile02(rows){
     const cells=rows[r];
     jobs++;
     const subVal=cells[iSub]!=null?cells[iSub]:'';
-    const m=matchSub(subVal, idx);
+    const secVal=iSec>=0&&cells[iSec]!=null?cells[iSec]:'';
+    const m=matchSub(subVal, idx, secVal);
     let lat='', lng='';
     if(m.sub){
       const hasCoords = m.sub.lat!=null && m.sub.lat!=='' && m.sub.lng!=null && m.sub.lng!=='';
@@ -1626,8 +1655,8 @@ function buildFile02(rows){
       else noCoords.set(m.sub.name,(noCoords.get(m.sub.name)||0)+1);
     }
     else{
-      const key=String(subVal).trim();
-      const rec=unmatched.get(key)||{count:0};
+      const key=subKeyOf(subVal,secVal)||String(subVal).trim();
+      const rec=unmatched.get(key)||{count:0,name:String(subVal).trim(),section:String(secVal).trim()};
       rec.count++; unmatched.set(key,rec);
     }
     if(!lat) continue; // only geocoded rows export — unresolved / coordless jobs are dropped (and reported)
@@ -1728,13 +1757,17 @@ function loadFile01ForReview(text,name,restoring){
 function scanUnmatchedAtImport(){
   if(!jobsHeader) return;
   const iSubC=findCol(jobsHeader,'Subdiv Name'); if(iSubC<0) return;
+  const iSecC=findCol(jobsHeader,'Section');
   const idx=buildIndex();
   const unmatched=new Map();
   for(const r of jobsRows){
     if(r.removed) continue;
     const v=r.cells[iSubC]!=null?r.cells[iSubC]:'';
-    const m=matchSub(v, idx);
-    if(!m.sub){ const key=String(v).trim(); const rec=unmatched.get(key)||{count:0}; rec.count++; unmatched.set(key,rec); }
+    const sec=iSecC>=0&&r.cells[iSecC]!=null?r.cells[iSecC]:'';
+    const m=matchSub(v, idx, sec);
+    if(!m.sub){ const key=subKeyOf(v,sec)||String(v).trim();
+      const rec=unmatched.get(key)||{count:0,name:String(v).trim(),section:String(sec).trim()};
+      rec.count++; unmatched.set(key,rec); }
   }
   if(!unmatched.size) return;
   openUnmatchedModal(unmatched, scanUnmatchedAtImport, {mode:'import'});
@@ -2053,12 +2086,16 @@ function setFile01(text,name,fromStash){
 function openUnmatchedModal(unmatched, onResolvedRerun, opts){
   const atImport=!!(opts&&opts.mode==='import');
   const onSkip=opts&&opts.onSkip;
-  const entries=[...unmatched.entries()].map(([raw,info],i)=>({raw,count:info.count,i,resolved:null}));
+  // `raw` is the full place name (subdivision + section) — that is what gets matched,
+  // saved as an alias, and used to name a newly created sub.
+  const entries=[...unmatched.entries()].map(([raw,info],i)=>
+    ({raw,count:info.count,name:info.name||raw,section:info.section||'',i,resolved:null}));
+  const secChip=e=>e.section?` <span class="badge sec">Section ${esc(e.section)}</span>`:'';
   const root=document.getElementById('modalRoot');
   root.innerHTML=`
   <div class="backdrop">
     <div class="modal" style="max-width:760px">
-      <div class="mh"><h3>Sub resolution &mdash; ${entries.length} name(s) need review</h3>
+      <div class="mh"><h3>Sub resolution &mdash; ${entries.length} place(s) need review</h3>
         <div class="muted" style="font-size:13px;margin-top:4px"><b>Match</b> routes this import only &middot; <b>Match + alias</b> also saves the spelling so future imports auto-resolve &middot; or pick any sub / create new.</div></div>
       <div class="mb" id="umBody"></div>
       <div class="mf">
@@ -2073,7 +2110,7 @@ function openUnmatchedModal(unmatched, onResolvedRerun, opts){
     entry.resolved=subName; resolvedN++;
     const card=body.querySelector(`[data-card="${entry.i}"]`);
     if(card){ card.classList.add('done');
-      card.innerHTML=`<div class="review-head"><span class="raw">${esc(entry.raw)}</span>
+      card.innerHTML=`<div class="review-head"><span class="raw">${esc(entry.name)}</span>${secChip(entry)}
         <span class="meta">&rarr; <b>${esc(subName)}</b> ${how==='alias'?'(alias saved)':how==='create'?'(new sub)':'(this import only)'}</span>
         <span class="badge ok" style="margin-left:auto">resolved</span></div>`; }
     document.getElementById('umDone').disabled = resolvedN===0;
@@ -2101,7 +2138,7 @@ function openUnmatchedModal(unmatched, onResolvedRerun, opts){
             <button class="small" data-ma="${esc(c.name)}">Match + alias</button></span></div>`).join('')
       : `<div class="muted" style="font-size:12px;font-style:italic;padding:2px 0 4px">No close matches &mdash; pick below or create a new sub.</div>`;
     card.innerHTML=`
-      <div class="review-head"><span class="raw">${esc(entry.raw||'(blank)')}</span>
+      <div class="review-head"><span class="raw">${esc(entry.name||'(blank)')}</span>${secChip(entry)}
         <span class="meta"><b>${entry.count}</b> job row${entry.count===1?'':'s'}</span></div>
       ${sugHtml}
       <div class="review-label">&mdash; or pick any existing sub (type to filter)</div>
@@ -3538,7 +3575,7 @@ window.addEventListener('error',ev=>{
 });
 
 // init
-const APP_VERSION='v17 · 2026-09-08';
+const APP_VERSION='v18 · 2026-09-08';
 document.getElementById('appVer').textContent=APP_VERSION+' · '+REGION;
 // region switcher: each region is its own workspace; a click stores the choice
 // and reloads so the whole app boots into that region's storage
