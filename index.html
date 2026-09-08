@@ -948,6 +948,15 @@ svg.leaflet-image-layer.leaflet-interactive path {
   <!-- ================= SUBDIVISIONS ================= -->
   <section id="tab-subs" class="hide">
     <div class="card">
+      <h2>Import</h2>
+      <div class="row" style="align-items:center;gap:12px;flex-wrap:wrap">
+        <button class="primary" id="importAllBtn">&#8681; Import anything&hellip;</button>
+        <span class="muted" style="font-size:12.5px">Setup files, manager spreadsheets, Geotab zone exports, KMZ/KML site plans, or a whole folder &mdash;
+        the tool works out what each file is.</span>
+      </div>
+      <div id="kmzStatus" class="note hide" style="margin-top:12px"></div>
+    </div>
+    <div class="card">
       <h2>Dispatch rules</h2>
       <div class="row" style="align-items:center;gap:12px">
         <button class="primary small" id="prioBtn2">Priority matrix&hellip;</button>
@@ -962,23 +971,18 @@ svg.leaflet-image-layer.leaflet-interactive path {
         <button class="small" id="subsMapBtn">&#128205; Map</button>
         <button class="small" id="subsSortBtn" title="toggle list order: alphabetical or grouped by geography">Sort: A&ndash;Z</button>
         <button class="primary small" id="addSubBtn">+ Add</button>
-        <button class="small" id="kmzBtn">KMZ&hellip;</button>
         <input type="file" id="kmzFile" accept=".kmz,.kml" multiple class="hide">
-        <button class="small" id="kmzDirBtn">Scan folder&hellip;</button>
         <input type="file" id="kmzDir" webkitdirectory directory multiple class="hide">
-        <button class="small" id="zonesBtn" title="import Geotab zones export (customer zones only)">Zones (Excel)&hellip;</button>
         <input type="file" id="zonesFile" accept=".xlsx,.csv" class="hide">
         <div class="menu-wrap">
           <button class="small" id="subsMenuBtn" title="more">&#8943;</button>
           <div class="menu" id="subsMenu">
             <button id="exportSubs">Export JSON</button>
-            <button id="importSubsBtn">Import JSON</button>
             <button class="mdanger" id="resetSubs">Reset to seed</button>
           </div>
         </div>
         <input type="file" id="importSubs" accept=".json" class="hide">
       </div>
-      <div id="kmzStatus" class="note hide" style="margin-bottom:12px"></div>
       <div id="subsListWrap">
         <div class="subs-grid-head" id="subsGridHead"></div>
         <div id="subsList" style="max-height:64vh;overflow-y:auto"></div>
@@ -995,13 +999,11 @@ svg.leaflet-image-layer.leaflet-interactive path {
       <div class="toolbar">
         <input type="search" class="grow" id="crewSearch" placeholder="Filter&hellip;">
         <button class="primary small" id="addCrewBtn">+ Add</button>
-        <button class="small" id="crewsXlsBtn" title="import the Crew Setup Template filled out by a manager">Crews (Excel)&hellip;</button>
         <input type="file" id="crewsXlsFile" accept=".xlsx,.csv" class="hide">
         <div class="menu-wrap">
           <button class="small" id="crewsMenuBtn" title="more">&#8943;</button>
           <div class="menu" id="crewsMenu">
             <button id="exportCrews">Export JSON</button>
-            <button id="importCrewsBtn">Import JSON</button>
             <button class="mdanger" id="resetCrews">Reset to seed</button>
           </div>
         </div>
@@ -3187,9 +3189,9 @@ document.getElementById('toastLogBtn').onclick=openToastLog;
 // subs
 document.getElementById('subSearch').oninput=renderSubs;
 document.getElementById('addSubBtn').onclick=()=>editSubModal(-1);
-document.getElementById('kmzBtn').onclick=()=>document.getElementById('kmzFile').click();
 document.getElementById('kmzFile').onchange=e=>{ const fs=[...e.target.files]; if(fs.length) processKmzFiles(fs); e.target.value=''; };
-document.getElementById('kmzDirBtn').onclick=()=>{
+function startFolderScan(){
+  document.getElementById('modalRoot').innerHTML='';
   if(window.showDirectoryPicker){
     setKmzStatus(`Pick a folder &mdash; allow &ldquo;view files&rdquo; if asked. Progress shows here.`);
     scanFolderModern();
@@ -3197,10 +3199,71 @@ document.getElementById('kmzDirBtn').onclick=()=>{
   }
   setKmzStatus(`Waiting for folder selection&hellip; if the browser asks to &ldquo;Upload N files&rdquo;, click Upload.`);
   document.getElementById('kmzDir').click();
-};
-document.getElementById('zonesBtn').onclick=()=>document.getElementById('zonesFile').click();
+}
+/* ---- one door for every kind of import: work out what each file is ---- */
+async function sniffSheet(f){            // 'crews' | 'zones' | null
+  try{
+    const grid = /\.csv$/i.test(f.name) ? parseCSV(await f.text()) : await parseXlsxGrid(await f.arrayBuffer());
+    for(let r=0;r<Math.min(12,grid.length);r++){
+      const cells=(grid[r]||[]).map(c=>norm(c));
+      const la=cells.findIndex(c=>/lat/.test(c)), lo=cells.findIndex(c=>/(lon|lng)/.test(c));
+      if(la<0||lo<0||la===lo) continue;
+      if(cells.some(c=>/first/.test(c))) return 'crews';
+      if(cells.some(c=>/name/.test(c))) return 'zones';
+    }
+  }catch(e){}
+  return null;
+}
+async function routeImportFiles(files){
+  const list=[...files]; if(!list.length) return;
+  const kmz=list.filter(f=>/\.(kmz|kml)$/i.test(f.name));
+  const json=list.filter(f=>/\.json$/i.test(f.name));
+  const sheets=list.filter(f=>/\.(xlsx|csv)$/i.test(f.name));
+  const other=list.filter(f=>!kmz.includes(f)&&!json.includes(f)&&!sheets.includes(f));
+  document.getElementById('modalRoot').innerHTML='';
+  for(const f of json){ const text=await f.text(); importSetupJson(text,f.name); }
+  for(const f of sheets){
+    const kind=await sniffSheet(f);
+    if(kind==='crews') await processCrewsFile(f);
+    else if(kind==='zones') await processZonesFile(f);
+    else showToast(`Couldn't tell what ${f.name} holds — it needs a header row with Latitude/Longitude`,'err');
+  }
+  if(kmz.length) processKmzFiles(kmz);
+  if(other.length) showToast(`Skipped ${other.length} file(s) the tool doesn't read: ${other.map(f=>f.name).slice(0,3).join(', ')}`,'warn');
+}
+function openImportModal(){
+  const root=document.getElementById('modalRoot');
+  root.innerHTML=`<div class="backdrop"><div class="modal" style="max-width:560px"><div class="mh"><h3>Import</h3>
+    <div class="muted" style="font-size:12.5px;margin-top:4px">Drop anything below &mdash; the tool identifies each file and sends it to the right place.</div></div>
+  <div class="mb">
+    <div id="impDrop" class="drop" style="margin-bottom:12px">
+      <p style="margin:0 0 8px"><b>Drag &amp; drop files here</b>, or</p>
+      <button class="primary" id="impPick">Choose file(s)&hellip;</button>
+      <input type="file" id="impFiles" multiple accept=".json,.xlsx,.csv,.kmz,.kml" class="hide">
+    </div>
+    <div class="row" style="align-items:center;gap:10px">
+      <button class="small" id="impFolder">&#128193; Scan a folder&hellip;</button>
+      <span class="muted" style="font-size:12px">Walks every sub-folder for KMZ/KML site plans.</span>
+    </div>
+    <div class="muted" style="font-size:11.5px;margin-top:12px;line-height:1.7">
+      <b>Setup / library JSON</b> &mdash; subdivisions and crews, routed to the market named inside<br>
+      <b>Crew spreadsheet</b> &mdash; the manager template (First Name + Home Latitude/Longitude)<br>
+      <b>Geotab zone export</b> &mdash; customer zones with centroids<br>
+      <b>KMZ / KML</b> &mdash; site plans, or a whole folder of them
+    </div>
+  </div>
+  <div class="mf"><button id="impClose">Close</button></div></div></div>`;
+  document.getElementById('impClose').onclick=()=>root.innerHTML='';
+  document.getElementById('impPick').onclick=()=>document.getElementById('impFiles').click();
+  document.getElementById('impFiles').onchange=e=>{ const fs=[...e.target.files]; e.target.value=''; routeImportFiles(fs); };
+  document.getElementById('impFolder').onclick=startFolderScan;
+  const dz=document.getElementById('impDrop');
+  ;['dragenter','dragover'].forEach(ev=>dz.addEventListener(ev,e=>{e.preventDefault();dz.classList.add('drag');}));
+  ;['dragleave','drop'].forEach(ev=>dz.addEventListener(ev,e=>{e.preventDefault();dz.classList.remove('drag');}));
+  dz.addEventListener('drop',e=>{ const fs=[...(e.dataTransfer.files||[])]; if(fs.length) routeImportFiles(fs); });
+}
+document.getElementById('importAllBtn').onclick=openImportModal;
 document.getElementById('zonesFile').onchange=e=>{ const f=e.target.files[0]; e.target.value=''; if(f) processZonesFile(f); };
-document.getElementById('crewsXlsBtn').onclick=()=>document.getElementById('crewsXlsFile').click();
 document.getElementById('crewsXlsFile').onchange=e=>{ const f=e.target.files[0]; e.target.value=''; if(f) processCrewsFile(f); };
 document.getElementById('kmzDir').onchange=e=>{
   const all=[...e.target.files]; const kmz=all.filter(f=>/\.(kmz|kml)$/i.test(f.name));
@@ -3216,7 +3279,6 @@ for(const [btn,menu] of [['subsMenuBtn','subsMenu'],['crewsMenuBtn','crewsMenu']
 }
 document.addEventListener('click',e=>{ if(!e.target.closest('.menu-wrap')) document.querySelectorAll('.menu.open').forEach(m=>m.classList.remove('open')); });
 document.getElementById('exportSubs').onclick=()=>download('subdivisions.json',JSON.stringify(SUBS,null,2));
-document.getElementById('importSubsBtn').onclick=()=>document.getElementById('importSubs').click();
 /* Merge helpers shared by the JSON importers. A file may carry subs, crews or
    both, and each record (or the file itself) may name its market. */
 function regionKey(r,what){ return (r==='FL'?'r4m_':'r4m_'+r.toLowerCase()+'_')+what+'_v1'; }
@@ -3271,9 +3333,9 @@ function mergeCrewsInto(r,incoming){
   writeRegion(r,'crews',cur,CREWS);
   return {added,updated,locs,total:cur.length};
 }
-document.getElementById('importSubs').onchange=e=>{ const f=e.target.files[0]; if(!f)return; const rd=new FileReader(); rd.onload=()=>{
+function importSetupJson(text,fname){
   try{
-    const data=JSON.parse(rd.result);
+    const data=JSON.parse(text);
     const known=Object.keys(REGION_DEFS);
     const pick=x=>known.includes(String(x&&x.region||'').toUpperCase())?String(x.region).toUpperCase():null;
     // Accepted shapes:
@@ -3281,13 +3343,23 @@ document.getElementById('importSubs').onchange=e=>{ const f=e.target.files[0]; i
     //   [subs with region...]             tagged list -> merged into each named market
     //   {region?, subs:[...], crews:[...]} bundle     -> both libraries, per market
     let subsIn=[], crewsIn=[], bundle=false, fileRegion=null;
-    if(Array.isArray(data)) subsIn=data;
+    if(Array.isArray(data)){
+      // a bare list is subs unless the records look like crew records
+      const crewish=data.filter(x=>x&&(x.code!==undefined||x.locs!==undefined||x.email!==undefined||x.last!==undefined)).length;
+      const subish=data.filter(x=>x&&(x.aliases!==undefined||x.nickname!==undefined)).length;
+      if(crewish>subish) crewsIn=data; else subsIn=data;
+    }
     else if(data&&typeof data==='object'){
       bundle=true; fileRegion=pick(data);
       subsIn=Array.isArray(data.subs)?data.subs:[];
       crewsIn=Array.isArray(data.crews)?data.crews:[];
     } else throw 0;
     const anyTagged = bundle || subsIn.some(pick) || crewsIn.some(pick);
+    if(!anyTagged && crewsIn.length && !subsIn.length){
+      const r=mergeCrewsInto(REGION,crewsIn);
+      showToast(`Crews imported into ${REGION}: ${r.added} added, ${r.updated} updated${r.locs?`, ${r.locs} start location(s)`:''}`);
+      return;
+    }
     if(!anyTagged){
       SUBS=subsIn.map(x=>({name:String(x.name||'').trim(),nickname:x.nickname||'',address:x.address||'',
         lat:x.lat==null?null:x.lat,lng:x.lng==null?null:x.lng,aliases:Array.isArray(x.aliases)?x.aliases:[]}));
@@ -3311,10 +3383,11 @@ document.getElementById('importSubs').onchange=e=>{ const f=e.target.files[0]; i
       parts.push(`${r} +${bits.join(' / ')}`);
     }
     showToast('Imported: '+parts.join(' · '));
-  }catch(err){ showToast('Invalid JSON','err'); }
-}; rd.readAsText(f); e.target.value=''; };
+  }catch(err){ showToast(`Couldn't read ${fname||'that JSON file'}`,'err'); }
+}
+document.getElementById('importSubs').onchange=e=>{ const f=e.target.files[0]; if(!f)return;
+  const rd=new FileReader(); rd.onload=()=>importSetupJson(rd.result,f.name); rd.readAsText(f); e.target.value=''; };
 document.getElementById('exportCrews').onclick=()=>download('crews.json',JSON.stringify(CREWS,null,2));
-document.getElementById('importCrewsBtn').onclick=()=>document.getElementById('importCrews').click();
 document.getElementById('importCrews').onchange=e=>{ const f=e.target.files[0]; if(!f)return; const rd=new FileReader(); rd.onload=()=>{ try{const d=JSON.parse(rd.result); if(!Array.isArray(d))throw 0; CREWS=d.map(x=>({name:x.name||'',last:x.last||'',code:x.code||'',email:x.email||'',lat:x.lat,lng:x.lng,active:x.active!==false})); persistCrews(); renderCrews(); showToast('Imported '+CREWS.length+' crews'); }catch(err){ showToast('Invalid JSON'); } }; rd.readAsText(f); e.target.value=''; };
 document.getElementById('resetCrews').onclick=()=>{ if(confirm('Reset the crew library to the original seed?')){ CREWS=JSON.parse(JSON.stringify(REGION_CREWS_SEED)); persistCrews(); renderCrews(); showToast('Reset'); } };
 document.getElementById('crewBody').addEventListener('change',e=>{
@@ -3342,7 +3415,7 @@ window.addEventListener('error',ev=>{
 });
 
 // init
-const APP_VERSION='v9 · 2026-09-08';
+const APP_VERSION='v10 · 2026-09-08';
 document.getElementById('appVer').textContent=APP_VERSION+' · '+REGION;
 // region switcher: each region is its own workspace; a click stores the choice
 // and reloads so the whole app boots into that region's storage
