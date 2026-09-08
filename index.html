@@ -3160,7 +3160,47 @@ for(const [btn,menu] of [['subsMenuBtn','subsMenu'],['crewsMenuBtn','crewsMenu']
 document.addEventListener('click',e=>{ if(!e.target.closest('.menu-wrap')) document.querySelectorAll('.menu.open').forEach(m=>m.classList.remove('open')); });
 document.getElementById('exportSubs').onclick=()=>download('subdivisions.json',JSON.stringify(SUBS,null,2));
 document.getElementById('importSubsBtn').onclick=()=>document.getElementById('importSubs').click();
-document.getElementById('importSubs').onchange=e=>{ const f=e.target.files[0]; if(!f)return; const rd=new FileReader(); rd.onload=()=>{ try{const d=JSON.parse(rd.result); if(!Array.isArray(d))throw 0; SUBS=d.map(x=>({name:x.name||'',nickname:x.nickname||'',address:x.address||'',lat:x.lat==null?null:x.lat,lng:x.lng==null?null:x.lng,aliases:x.aliases||[]})); persistSubs(); renderSubs(); showToast('Imported '+SUBS.length+' subdivisions'); }catch(err){ showToast('Invalid JSON'); } }; rd.readAsText(f); e.target.value=''; };
+document.getElementById('importSubs').onchange=e=>{ const f=e.target.files[0]; if(!f)return; const rd=new FileReader(); rd.onload=()=>{
+  try{
+    const d=JSON.parse(rd.result); if(!Array.isArray(d)) throw 0;
+    const clean=x=>({name:String(x.name||'').trim(),nickname:x.nickname||'',address:x.address||'',
+      lat:x.lat==null?null:x.lat,lng:x.lng==null?null:x.lng,aliases:Array.isArray(x.aliases)?x.aliases:[]});
+    // A record may name its own region. If any do, the file is a multi-market
+    // seed: each region is MERGED (new subs added, coordinates filled, aliases
+    // never destroyed) rather than replaced, since you can't see those tabs.
+    const known=Object.keys(REGION_DEFS);
+    const tagged=d.filter(x=>x&&known.includes(String(x.region||'').toUpperCase()));
+    if(tagged.length){
+      const keyFor=r=>(r==='FL'?'r4m_':'r4m_'+r.toLowerCase()+'_')+'subs_v1';
+      const groups={};
+      for(const x of d){ const r=known.includes(String(x.region||'').toUpperCase())?String(x.region).toUpperCase():REGION;
+        (groups[r]=groups[r]||[]).push(clean(x)); }
+      const parts=[];
+      for(const r of Object.keys(groups)){
+        let cur=[]; try{ cur=JSON.parse(localStorage.getItem(keyFor(r))||'[]'); }catch(err){}
+        if(!Array.isArray(cur)) cur=[];
+        if(r===REGION) cur=SUBS;
+        const byName=new Map(cur.map(s=>[norm(s.name),s]));
+        let added=0, filled=0;
+        for(const s of groups[r]){
+          if(!s.name) continue;
+          const hit=byName.get(norm(s.name));
+          if(hit){ if(!subHasGeo(hit) && s.lat!=null){ hit.lat=s.lat; hit.lng=s.lng; filled++; }
+                   if(!hit.address && s.address) hit.address=s.address; }
+          else { cur.push(s); byName.set(norm(s.name),s); added++; }
+        }
+        try{ localStorage.setItem(keyFor(r),JSON.stringify(cur)); }catch(err){ showToast('Storage full — '+r+' not saved','err'); }
+        if(r===REGION){ SUBS=cur; renderSubs(); }
+        parts.push(`${r} +${added}${filled?` (${filled} coords filled)`:''}`);
+        logMsg(`Subs import → ${r}: ${added} added${filled?`, ${filled} coordinates filled`:''}, ${cur.length} total`);
+      }
+      showToast('Imported across markets: '+parts.join(' · '));
+    } else {
+      SUBS=d.map(clean); persistSubs(); renderSubs();
+      showToast('Imported '+SUBS.length+' subdivisions into '+REGION);
+    }
+  }catch(err){ showToast('Invalid JSON','err'); }
+}; rd.readAsText(f); e.target.value=''; };
 document.getElementById('resetSubs').onclick=()=>{ if(confirm('Reset the subdivision library to the original seed? Your changes will be lost.')){ SUBS=JSON.parse(JSON.stringify(REGION_SUBS_SEED)); persistSubs(); renderSubs(); showToast('Reset'); } };
 document.getElementById('subsMapBtn').onclick=()=>toggleSubsMap();
 document.getElementById('subsSortBtn').onclick=()=>{
@@ -3240,7 +3280,7 @@ window.addEventListener('error',ev=>{
 });
 
 // init
-const APP_VERSION='v7 · 2026-09-02';
+const APP_VERSION='v8 · 2026-09-08';
 document.getElementById('appVer').textContent=APP_VERSION+' · '+REGION;
 // region switcher: each region is its own workspace; a click stores the choice
 // and reloads so the whole app boots into that region's storage
