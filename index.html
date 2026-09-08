@@ -1936,13 +1936,31 @@ function renderCrewMap(fit){
   const {byCrew,of}=previewAssign(pts,starts,cap);
   const colorOf=new Map(starts.map(s=>[s.i,s.color]));
 
+  /* Every job in a subdivision sits on that sub's single centroid, so drawing one
+     dot per job stacks 20 jobs invisibly on top of 1. Group by location and size
+     the dot by how much work is there — volume is the thing you're judging when
+     you decide where a start belongs. */
   crewJobLayer.clearLayers();
+  const bySpot=new Map();
   for(const p of pts){
+    const k=p.lat+','+p.lng;
+    let g=bySpot.get(k);
+    if(!g){ g={lat:p.lat,lng:p.lng,sub:p.sub,n:0,crews:new Map(),mi:0}; bySpot.set(k,g); }
+    g.n++;
     const a=of.get(p.id);
-    const col=a?colorOf.get(a.crew):'#9aa4b2';
-    L.circleMarker([p.lat,p.lng],{radius:4,color:col,weight:1,fillColor:col,fillOpacity:.75})
-      .bindTooltip(`${esc(p.task||'job')} — ${esc(p.sub)}${p.addr?'<br>'+esc(p.addr):''}`+
-        (a?`<br><b>${esc((starts.find(s=>s.i===a.crew)||{}).name||'')}</b> · ${a.mi.toFixed(1)} mi`:''),{sticky:true})
+    if(a){ g.crews.set(a.crew,(g.crews.get(a.crew)||0)+1); g.mi=a.mi; }
+  }
+  const nameOf=new Map(starts.map(s=>[s.i,s.name]));
+  for(const g of bySpot.values()){
+    const ranked=[...g.crews.entries()].sort((a,b)=>b[1]-a[1]);
+    const owner=ranked.length?ranked[0][0]:null;
+    const col=owner!=null?colorOf.get(owner):'#9aa4b2';
+    const split=ranked.length>1
+      ? '<br>'+ranked.map(([c,n])=>`${esc(nameOf.get(c)||'?')} ${n}`).join(' · ')
+      : (owner!=null?`<br><b>${esc(nameOf.get(owner)||'')}</b> · ${g.mi.toFixed(1)} mi`:'');
+    L.circleMarker([g.lat,g.lng],{radius:Math.min(16,4+Math.sqrt(g.n)*2.2),
+        color:col,weight:1,fillColor:col,fillOpacity:.7})
+      .bindTooltip(`<b>${esc(g.sub)}</b><br>${g.n} job${g.n===1?'':'s'}${split}`,{sticky:true})
       .addTo(crewJobLayer);
   }
   crewPinLayer.clearLayers();
@@ -3657,26 +3675,51 @@ document.getElementById('cmReset').onclick=()=>{
   if(!Object.keys(PREVIEW_STARTS).length){ showToast('Nothing moved'); return; }
   PREVIEW_STARTS={}; renderCrewMap(true); showToast('Back to each crew’s saved start');
 };
-/* A dragged pin is a what-if until it's asked for: saving adds it as another
-   named start on that crew, so their real home is still there in the dropdown. */
+/* A dragged pin is a what-if until it's asked for. Saving keeps it for good as
+   another named start on that crew — their real home stays in the dropdown, so
+   the manager can flip back to it any morning. Each pin is named on its own:
+   moving three crews usually means three different places, not one. */
 document.getElementById('cmSave').onclick=()=>{
   const moved=Object.keys(PREVIEW_STARTS);
   if(!moved.length){ showToast('Drag a start first'); return; }
-  const label=(prompt('Name for these start locations (e.g. "Frisco cluster")','Map start')||'').trim();
-  if(!label) return;
-  let n=0;
-  for(const k of moved){
-    const c=CREWS[+k]; if(!c) continue;
-    const p=PREVIEW_STARTS[k];
-    const L=crewLocs(c);
-    const hit=L.findIndex(x=>String(x.label)===label);
-    if(hit>=0){ L[hit].lat=p.lat; L[hit].lng=p.lng; crewSetLoc(c,hit); }
-    else { L.push({label,lat:p.lat,lng:p.lng}); crewSetLoc(c,L.length-1); }
-    n++;
-  }
-  persistCrews(); renderCrews();
-  PREVIEW_STARTS={}; renderCrewMap(false);
-  showToast(`Saved "${label}" as the start for ${n} crew(s)`);
+  const root=document.getElementById('modalRoot2');
+  const rows=moved.map(k=>{
+    const c=CREWS[+k]||{}, p=PREVIEW_STARTS[k];
+    const nm=`${c.name||''} ${c.last||''}`.trim()||c.code||`Crew ${+k+1}`;
+    const away=isFinite(+c.lat)?haversineMi(+c.lat,+c.lng,p.lat,p.lng):null;
+    return `<tr data-row="${k}">
+      <td style="white-space:nowrap">${esc(nm)}<div class="muted" style="font-size:11px">
+        ${p.lat.toFixed(5)}, ${p.lng.toFixed(5)}${away!=null?` · ${away.toFixed(1)} mi from home`:''}</div></td>
+      <td><input type="text" data-nm="${k}" value="Map start" placeholder="name this start"
+        style="width:100%;padding:6px 8px;font:inherit;font-size:13px;border:1px solid var(--line);border-radius:8px"></td>
+      <td style="width:34px"><input type="checkbox" data-keep="${k}" checked title="save this one"></td></tr>`;
+  }).join('');
+  root.innerHTML=`<div class="backdrop"><div class="modal" style="max-width:620px">
+    <div class="mh"><h3>Keep these starts</h3>
+      <div class="muted" style="font-size:12px;margin-top:4px">Each one is added to that crew as a named start location.
+        Their real home stays where it is &mdash; switch between them from the crew list any time.</div></div>
+    <div class="mb"><div class="tablewrap"><table>
+      <thead><tr><th>Crew</th><th>Name this start</th><th></th></tr></thead><tbody>${rows}</tbody></table></div></div>
+    <div class="mf"><button id="ssCancel">Cancel</button><button class="primary" id="ssOk">Save</button></div></div></div>`;
+  root.querySelector('#ssCancel').onclick=()=>root.innerHTML='';
+  root.querySelector('#ssOk').onclick=()=>{
+    let n=0, skipped=0;
+    for(const k of moved){
+      if(!root.querySelector(`[data-keep="${k}"]`).checked){ skipped++; continue; }
+      const label=root.querySelector(`[data-nm="${k}"]`).value.trim();
+      if(!label){ skipped++; continue; }
+      const c=CREWS[+k]; if(!c) continue;
+      const p=PREVIEW_STARTS[k], L=crewLocs(c);
+      const hit=L.findIndex(x=>norm(x.label)===norm(label));
+      if(hit>=0){ L[hit].lat=p.lat; L[hit].lng=p.lng; crewSetLoc(c,hit); }
+      else { L.push({label,lat:p.lat,lng:p.lng}); crewSetLoc(c,L.length-1); }
+      delete PREVIEW_STARTS[k];
+      n++;
+    }
+    persistCrews(); renderCrews(); root.innerHTML=''; renderCrewMap(false);
+    showToast(n?`Kept ${n} start location${n===1?'':'s'}${skipped?` · ${skipped} left as a what-if`:''}`
+               :'Nothing saved');
+  };
 };
 document.getElementById('subsMapBtn').onclick=()=>toggleSubsMap();
 document.getElementById('subsFoldBtn').onclick=()=>{
@@ -3766,7 +3809,7 @@ window.addEventListener('error',ev=>{
 });
 
 // init
-const APP_VERSION='v19 · 2026-09-08';
+const APP_VERSION='v20 · 2026-09-08';
 document.getElementById('appVer').textContent=APP_VERSION+' · '+REGION;
 // region switcher: each region is its own workspace; a click stores the choice
 // and reloads so the whole app boots into that region's storage
