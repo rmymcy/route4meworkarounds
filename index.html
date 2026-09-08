@@ -1113,8 +1113,53 @@ function crewAddLoc(c,label,lat,lng){
   if(L.length===1) crewSetLoc(c,0);
   return true;
 }
-function persistSubs(){ save(K_SUBS,packSubs(SUBS)); }
-function persistCrews(){ save(K_CREWS,CREWS); }
+/* Guard against the one failure that actually loses work: writing an empty (or
+   drastically smaller) library over a full one. That happens when a second tab
+   is open on the same market with stale state, when a load silently fell back
+   to the seed, or when any handler runs before an import finishes. The write is
+   refused, the good copy stays on disk, and the operator is told out loud. */
+function storedCount(key){
+  try{ const v=JSON.parse(localStorage.getItem(key)||'[]'); return Array.isArray(v)?v.length:0; }catch(e){ return 0; }
+}
+function guardedSave(key,arr,packed,label){
+  const have=arr.length, had=storedCount(key);
+  if(had>0 && have===0){
+    showToast(`Refused to erase ${had} ${label} — this page is out of date. Reload before making changes.`,'err');
+    logMsg(`BLOCKED a wipe: tried to save 0 ${label} over ${had} stored (${key}). Nothing was changed.`,'err');
+    return false;
+  }
+  if(had>=25 && have<had*0.5){
+    if(!confirm(`This will cut ${label} from ${had} to ${have}. Continue?`)){
+      logMsg(`Cancelled a large ${label} reduction (${had} -> ${have})`,'warn');
+      return false;
+    }
+  }
+  const ok=save(key,packed);
+  if(ok && have>0){                              // verify it really landed
+    const after=storedCount(key);
+    if(after!==have){
+      showToast(`Save did not stick — the browser stored ${after} of ${have} ${label}. Export a backup now.`,'err');
+      logMsg(`VERIFY FAILED for ${key}: wrote ${have}, read back ${after}`,'err');
+      return false;
+    }
+  }
+  return ok;
+}
+function persistSubs(){ return guardedSave(K_SUBS,SUBS,packSubs(SUBS),'subdivisions'); }
+function persistCrews(){ return guardedSave(K_CREWS,CREWS,CREWS,'crews'); }
+/* Another tab writing this market's library is the classic way a good copy gets
+   clobbered; notice it and say so instead of letting it pass unseen. */
+window.addEventListener('storage',e=>{
+  if(!e.key || e.newValue===e.oldValue) return;
+  if(e.key===K_SUBS || e.key===K_CREWS){
+    const mine=(e.key===K_SUBS?SUBS:CREWS).length;
+    let theirs=0; try{ const v=JSON.parse(e.newValue||'[]'); theirs=Array.isArray(v)?v.length:0; }catch(err){}
+    if(theirs<mine){
+      showToast(`Another tab just changed ${REGION} (${mine} → ${theirs}). Close the other tab and reload.`,'err');
+      logMsg(`Another tab wrote ${e.key}: ${mine} -> ${theirs}`,'err');
+    }
+  }
+});
 
 // territories were removed — clean up their old storage keys in every region
 // (the shelved API experiment's stored key is scrubbed here too)
@@ -3083,9 +3128,16 @@ function readRegion(r,what,live){
        return what==='subs' ? unpackSubs(v) : v; }catch(e){ return []; }
 }
 function writeRegion(r,what,arr,live){
-  save(regionKey(r,what), what==='subs'?packSubs(arr):arr);
+  const key=regionKey(r,what);
+  const ok=save(key, what==='subs'?packSubs(arr):arr);
+  const after=storedCount(key);
+  if(!ok || after!==arr.length){
+    IMPORT_PROBLEMS.push(`${r} ${what}: kept ${after} of ${arr.length} — browser storage rejected the rest`);
+    logMsg(`IMPORT NOT SAVED for ${r} ${what}: wrote ${arr.length}, stored ${after}`,'err');
+  }
   if(r===REGION){ if(what==='subs'){ SUBS=arr; renderSubs(); } else { CREWS=arr; renderCrews(); } }
 }
+let IMPORT_PROBLEMS=[];
 function mergeSubsInto(r,incoming){
   const cur=readRegion(r,'subs',SUBS).slice();
   const by=new Map(cur.map(s=>[norm(s.name),s]));
@@ -3162,6 +3214,7 @@ function importSetupJson(text,fname){
       showToast('Imported '+SUBS.length+' subdivisions into '+REGION);
       return;
     }
+    IMPORT_PROBLEMS=[];
     const groups={};
     const put=(arr,what)=>{ for(const x of arr){ const r=pick(x)||fileRegion||REGION;
       (groups[r]=groups[r]||{subs:[],crews:[]})[what].push(x); } };
@@ -3177,7 +3230,9 @@ function importSetupJson(text,fname){
         logMsg(`Import → ${r} crews: ${c.added} added, ${c.updated} updated${c.locs?`, ${c.locs} start location(s)`:''}, ${c.total} total`); }
       parts.push(`${r} +${bits.join(' / ')}`);
     }
-    showToast('Imported: '+parts.join(' · '));
+    if(IMPORT_PROBLEMS.length){
+      showToast('Import could NOT be saved — '+IMPORT_PROBLEMS[0]+' (see Log). Free space and try again.','err');
+    } else showToast('Imported: '+parts.join(' · '));
   }catch(err){ showToast(`Couldn't read ${fname||'that JSON file'}`,'err'); }
 }
 document.getElementById('importSubs').onchange=e=>{ const f=e.target.files[0]; if(!f)return;
@@ -3271,7 +3326,7 @@ window.addEventListener('error',ev=>{
 });
 
 // init
-const APP_VERSION='v14 · 2026-09-08';
+const APP_VERSION='v15 · 2026-09-08';
 document.getElementById('appVer').textContent=APP_VERSION+' · '+REGION;
 // region switcher: each region is its own workspace; a click stores the choice
 // and reloads so the whole app boots into that region's storage
