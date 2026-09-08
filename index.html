@@ -946,7 +946,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
   </section>
 
   <!-- ================= SUBDIVISIONS ================= -->
-  <section id="tab-subs" class="hide">
+  <section id="tab-crews" class="hide">
     <div class="card">
       <h2>Import</h2>
       <div class="row" style="align-items:center;gap:12px;flex-wrap:wrap">
@@ -956,6 +956,31 @@ svg.leaflet-image-layer.leaflet-interactive path {
       </div>
       <div id="kmzStatus" class="note hide" style="margin-top:12px"></div>
     </div>
+    <div class="card">
+      <h2>Crews</h2>
+      <div class="toolbar">
+        <input type="search" class="grow" id="crewSearch" placeholder="Filter&hellip;">
+        <button class="primary small" id="addCrewBtn">+ Add</button>
+        <input type="file" id="crewsXlsFile" accept=".xlsx,.csv" class="hide">
+        <div class="menu-wrap">
+          <button class="small" id="crewsMenuBtn" title="more">&#8943;</button>
+          <div class="menu" id="crewsMenu">
+            <button id="exportCrews">Export JSON</button>
+            <button class="mdanger" id="resetCrews">Reset to seed</button>
+          </div>
+        </div>
+        <input type="file" id="importCrews" accept=".json" class="hide">
+      </div>
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th style="width:52px">On</th><th>Crew</th><th style="width:90px">Servicer Id</th><th style="width:170px">Home Lat / Long</th><th style="width:90px"></th></tr></thead>
+          <tbody id="crewBody"></tbody>
+        </table>
+      </div>
+      <p class="muted" id="crewCount" style="margin:10px 2px 0"></p>
+    </div>
+  </section>
+  <section id="tab-subs" class="hide">
     <div class="card">
       <h2>Dispatch rules</h2>
       <div class="row" style="align-items:center;gap:12px">
@@ -989,33 +1014,6 @@ svg.leaflet-image-layer.leaflet-interactive path {
       </div>
       <div id="subsMapWrap" class="hide"></div>
       <p class="muted" id="subCount" style="margin:10px 2px 0"></p>
-    </div>
-  </section>
-
-  <!-- ================= CREWS ================= -->
-  <section id="tab-crews" class="hide">
-    <div class="card">
-      <h2>Crews</h2>
-      <div class="toolbar">
-        <input type="search" class="grow" id="crewSearch" placeholder="Filter&hellip;">
-        <button class="primary small" id="addCrewBtn">+ Add</button>
-        <input type="file" id="crewsXlsFile" accept=".xlsx,.csv" class="hide">
-        <div class="menu-wrap">
-          <button class="small" id="crewsMenuBtn" title="more">&#8943;</button>
-          <div class="menu" id="crewsMenu">
-            <button id="exportCrews">Export JSON</button>
-            <button class="mdanger" id="resetCrews">Reset to seed</button>
-          </div>
-        </div>
-        <input type="file" id="importCrews" accept=".json" class="hide">
-      </div>
-      <div class="tablewrap">
-        <table>
-          <thead><tr><th style="width:52px">On</th><th>Crew</th><th style="width:90px">Servicer Id</th><th style="width:170px">Home Lat / Long</th><th style="width:90px"></th></tr></thead>
-          <tbody id="crewBody"></tbody>
-        </table>
-      </div>
-      <p class="muted" id="crewCount" style="margin:10px 2px 0"></p>
     </div>
   </section>
 </main>
@@ -3415,7 +3413,7 @@ window.addEventListener('error',ev=>{
 });
 
 // init
-const APP_VERSION='v10 · 2026-09-08';
+const APP_VERSION='v11 · 2026-09-08';
 document.getElementById('appVer').textContent=APP_VERSION+' · '+REGION;
 // region switcher: each region is its own workspace; a click stores the choice
 // and reloads so the whole app boots into that region's storage
