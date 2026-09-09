@@ -1502,6 +1502,24 @@ function loadPrioMx(){
   return mx;
 }
 function prioMxActive(mx){ return Object.values(mx.fam||{}).some(f=>[...(f.due||[]),...(f.recv||[])].some(x=>x!==''&&x!=null)); }
+/* A task is matched by its exact Sage name, so anything spelled differently —
+   or a task type this market has and Florida never did — quietly comes out with
+   a blank Priority. Rather than leave the manager guessing which ones, list the
+   task names sitting in the loaded file that no family claims. */
+function unmappedTasks(fam){
+  if(!jobsHeader) return [];
+  const i=findCol(jobsHeader,'Description Of Problem'); if(i<0) return [];
+  const mapped=new Set();
+  for(const f of Object.values(fam||{})) for(const t of (f.tasks||[])) mapped.add(norm(t));
+  const seen=new Map();
+  for(const r of jobsRows){
+    if(r.removed) continue;
+    const raw=String(r.cells[i]==null?'':r.cells[i]).trim();
+    if(!raw || mapped.has(norm(raw))) continue;
+    seen.set(raw,(seen.get(raw)||0)+1);
+  }
+  return [...seen.entries()].sort((a,b)=>b[1]-a[1]);
+}
 function openPrioModal(){
   const mx=loadPrioMx();
   const fam=mx.fam;
@@ -1513,6 +1531,21 @@ function openPrioModal(){
     </div>`;
   const render=()=>{
     const keys=Object.keys(fam);
+    const un=unmappedTasks(fam);
+    const unJobs=un.reduce((a,b)=>a+b[1],0);
+    const unHtml = !jobsHeader ? ''
+      : un.length ? `<div style="margin-top:12px;padding:10px 11px;border:1px solid var(--warn);background:var(--warn-bg);border-radius:8px">
+          <div style="font-size:11px;color:var(--warn);text-transform:uppercase;letter-spacing:.06em;font-weight:700">
+            In this file but not mapped &mdash; ${un.length} task${un.length===1?'':'s'}, ${unJobs} job${unJobs===1?'':'s'} getting a blank Priority</div>
+          <div class="muted" style="font-size:11px;margin:3px 0 7px">Task names must match Sage exactly. Pick a family and it's mapped from here.</div>
+          ${un.map(([t,n],ui)=>`<div style="display:flex;gap:8px;align-items:center;margin-top:5px;flex-wrap:wrap">
+            <span class="alias-chip" style="font-size:12px;padding:3px 10px">${esc(t)}&nbsp;<b>&times;${n}</b></span>
+            <select data-pmmap="${ui}" style="padding:4px 8px;font-size:12px;border:1px solid var(--line);border-radius:8px">
+              <option value="">map to&hellip;</option>
+              ${keys.map(k=>`<option value="${esc(k)}">${esc(fam[k].label)}</option>`).join('')}
+            </select></div>`).join('')}
+        </div>`
+      : `<div class="muted" style="margin-top:12px;font-size:12px">&#10003; Every task in the loaded file is mapped.</div>`;
     root.innerHTML=`<div class="backdrop"><div class="modal" style="max-width:680px"><div class="mh"><h3>Priority matrix</h3>
       <div class="muted" style="font-size:12.5px;margin-top:4px">Lower = hotter. A job takes the <b>hottest</b> value its dates hit on either clock.
       Blank cell = skip that bucket; a task in no family gets a blank Priority (Sage&rsquo;s numbers are never passed through).
@@ -1535,6 +1568,7 @@ function openPrioModal(){
         ${numRow(k,'due',PRIO_DUE,f.due||['','','',''])}
         ${numRow(k,'recv',PRIO_RECV,f.recv||['','','',''])}
       </div>`;}).join('')}
+      ${unHtml}
       <div class="row" style="margin-top:10px">
         <input type="text" id="pmNewFam" placeholder="Add family (e.g. Plats)" style="flex:1">
         <button class="primary small" id="pmFamAdd">Add</button>
@@ -1567,6 +1601,14 @@ function openPrioModal(){
     document.getElementById('pmNewFam').addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); document.getElementById('pmFamAdd').click(); } });
     root.querySelectorAll('[data-pmfdel]').forEach(b=>b.onclick=()=>{ if(confirm(`Remove "${fam[b.dataset.pmfdel].label}"? Its tasks fall back to Sage's Priority.`)){ collect(); delete fam[b.dataset.pmfdel]; render(); } });
     root.querySelectorAll('[data-pmtdel]').forEach(b=>b.onclick=()=>{ collect(); fam[b.dataset.pmtdel].tasks.splice(+b.dataset.ti,1); render(); });
+    root.querySelectorAll('[data-pmmap]').forEach(sel=>sel.onchange=()=>{
+      const k=sel.value, t=(un[+sel.dataset.pmmap]||[])[0];
+      if(!k||!fam[k]||!t) return;
+      collect();
+      fam[k].tasks=fam[k].tasks||[];
+      if(!fam[k].tasks.some(x=>norm(x)===norm(t))) fam[k].tasks.push(t);
+      render();
+    });
     root.querySelectorAll('[data-pmcdel]').forEach(b=>b.onclick=()=>{ collect(); delete mx.codes[b.dataset.pmcdel]; render(); });
     document.getElementById('pmCodeAdd').onclick=()=>{
       const c=document.getElementById('pmCodeK').value.trim().toUpperCase();
@@ -1632,10 +1674,14 @@ function buildFile02(rows){
   const dayDiff=(a,b)=>Math.round((a-b)/86400000);
   let prioApplied=0, rushN=0;
   const codes=PRIOMX.codes||{R:'1'};
-  const prioFor=cells=>{ // {v, rush} or null -> keep Sage's Priority
+  const prioUnmapped=new Map();
+  const prioFor=cells=>{ // {v, rush} or null -> no priority at all
     const pc=iPrio01>=0?String(cells[iPrio01]||'').trim().toUpperCase():'';
     if(pc && codes[pc]!=null){ rushN++; return {v:String(codes[pc]),rush:true}; }
-    const f=famByTask[norm(cells[iTask])]; if(!f) return null;
+    const f=famByTask[norm(cells[iTask])];
+    if(!f){ const t=String(cells[iTask]||'').trim();
+      if(t) prioUnmapped.set(t,(prioUnmapped.get(t)||0)+1);
+      return null; }
     const cand=[];
     if(iSched01>=0){ const k=parseDateKey(cells[iSched01]);
       if(k!=null){ const d=dayDiff(keyDate(k),routeDay);
@@ -1723,7 +1769,7 @@ function buildFile02(rows){
 
   const outName=`Route4Me Upload ${REGION} ${todayStamp()}.csv`;
   return {rows:out, outName, schedFor, prioOn, prioApplied, rushN, unmatched, noCoords, matched, jobs,
-          depots, depotsMoved};
+          depots, depotsMoved, prioUnmapped};
 }
 function isActive(cw){ return cw.active!==false; } // default on unless explicitly false
 function todayStamp(){ const d=new Date(); const p=n=>String(n).padStart(2,'0'); return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`; }
@@ -2075,7 +2121,12 @@ function jobsClick(e){
 function finishExport(res){
   if(!res.matched){ showToast('Nothing geocoded — nothing to export. Resolve subs or set coordinates first.','err'); return; }
   if(res.schedFor) logMsg(`Scheduled For ${res.schedFor} stamped on every job`);
-  if(res.prioOn) logMsg(`Priority matrix: ${res.prioApplied} of ${res.matched} prioritized${res.rushN?` (${res.rushN} letter-coded)`:''}; unmapped left blank`);
+  if(res.prioOn){
+    logMsg(`Priority matrix: ${res.prioApplied} of ${res.matched} prioritized${res.rushN?` (${res.rushN} letter-coded)`:''}; unmapped left blank`);
+    if(res.prioUnmapped && res.prioUnmapped.size)
+      logMsg(`No priority — these tasks aren't mapped to a family (Priority… to map them): `+
+        [...res.prioUnmapped].sort((a,b)=>b[1]-a[1]).map(([t,n])=>`${t} ×${n}`).join(', '),'warn');
+  }
   if(res.unmatched.size) logMsg(`Dropped — unresolved subs: ${[...res.unmatched].map(([k,i])=>`${k||'(blank)'} ×${i.count}`).join(', ')}`,'warn');
   if(res.noCoords.size) logMsg(`Dropped — no coordinates yet: ${[...res.noCoords].map(([k,n])=>`${k} ×${n}`).join(', ')}`,'warn');
   if(res.depots) logMsg(`Depot rows appended: ${res.depots} crew start(s)${res.depotsMoved?`, ${res.depotsMoved} moved on the crew map`:''}`);
@@ -3843,7 +3894,7 @@ window.addEventListener('error',ev=>{
 });
 
 // init
-const APP_VERSION='v21 · 2026-09-08';
+const APP_VERSION='v22 · 2026-09-09';
 document.getElementById('appVer').textContent=APP_VERSION+' · '+REGION;
 // region switcher: each region is its own workspace; a click stores the choice
 // and reloads so the whole app boots into that region's storage
