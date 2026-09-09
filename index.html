@@ -2068,7 +2068,7 @@ function jobPoints(){
     const m=matchSub(r.cells[iSub]!=null?r.cells[iSub]:'', idx, iSec>=0&&r.cells[iSec]!=null?r.cells[iSec]:'');
     if(!m.sub) continue;
     const lat=+m.sub.lat, lng=+m.sub.lng;
-    if(!isFinite(lat)||!isFinite(lng)) continue;
+    if(!geoOk(lat,lng)) continue;
     out.push({id:r.id, lat, lng, sub:m.sub.name,
       addr:iAddr>=0?String(r.cells[iAddr]||'').trim():'', task:iTask>=0?String(r.cells[iTask]||'').trim():''});
   }
@@ -2081,7 +2081,7 @@ function crewStarts(){
     if(!isActive(c)) return;
     const mv=PREVIEW_STARTS[i];
     const lat=mv?mv.lat:+c.lat, lng=mv?mv.lng:+c.lng;
-    if(!isFinite(lat)||!isFinite(lng)) return;
+    if(!geoOk(lat,lng)) return;
     out.push({i, lat, lng, moved:!!mv, color:crewColor(out.length),
       name:`${c.name||''} ${c.last||''}`.trim()||c.code||`Crew ${i+1}`, code:c.code||''});
   });
@@ -2171,7 +2171,8 @@ function renderCrewMap(fit){
   }
   if(fit){
     const all=pts.map(p=>[p.lat,p.lng]).concat(starts.map(s=>[s.lat,s.lng]));
-    if(all.length) crewMapInstance.fitBounds(all,{padding:[40,40]});
+    const {keep}=fitCluster(all,500);          // a stray pin must not zoom us to the world
+    if(keep.length) crewMapInstance.fitBounds(keep,{padding:[40,40]});
   }
   renderCrewSummary(starts,byCrew,of,pts.length);
 }
@@ -2612,6 +2613,29 @@ function mountSubPicker(host,onPick){
 
 /* ============================ SUBS LIBRARY (inline grid, dispatch-style) ============================ */
 function subHasGeo(s){ return s.lat!=null&&s.lat!==''&&s.lng!=null&&s.lng!==''; }
+/* "Has coordinates" is not the same as "has usable coordinates". A swapped pair
+   (28.5,-81.4 typed as -81.4,28.5) is a perfectly legal point — in the Southern
+   Ocean — so it sails past every check and drags the map's bounds halfway round
+   the planet, which is what leaves a market opening zoomed to the whole world
+   and then labouring on every zoom. Range-check before anything reaches Leaflet. */
+function geoOk(lat,lng){
+  const a=+lat, o=+lng;
+  return isFinite(a)&&isFinite(o)&&a>=-90&&a<=90&&o>=-180&&o<=180&&!(a===0&&o===0);
+}
+function subGeoOk(s){ return subHasGeo(s)&&geoOk(s.lat,s.lng); }
+/* One stray pin should never decide the whole view. Fit to the points that sit
+   with the bulk of the work and let the strays be found by looking, not by the
+   map zooming out to include them. */
+function fitCluster(pts, maxMi){
+  if(pts.length<3) return {keep:pts, out:[]};
+  const lats=pts.map(p=>p[0]).slice().sort((a,b)=>a-b);
+  const lngs=pts.map(p=>p[1]).slice().sort((a,b)=>a-b);
+  const mid=a=>a[Math.floor(a.length/2)];
+  const cLat=mid(lats), cLng=mid(lngs);
+  const keep=[], out=[];
+  for(const p of pts) (haversineMi(p[0],p[1],cLat,cLng)<=(maxMi||500) ? keep : out).push(p);
+  return keep.length ? {keep,out} : {keep:pts,out:[]};
+}
 const K_SUBSORT=RK+'subsort_v1';
 let SUBS_SORT=load(K_SUBSORT,'az'); // 'az' | 'geo'
 /* Morton (z-order) key: interleaves lat/lng bits so map-neighbors sort adjacent */
@@ -2741,7 +2765,19 @@ function openGeoEditor(i){
     if(!v){ s.lat=null; s.lng=null; persistSubs(); root.innerHTML=''; renderSubs(); showToast('Coordinates cleared'); return; }
     const m=v.match(/^\s*(-?\d+(?:\.\d+)?)\s*[,;\s]\s*(-?\d+(?:\.\d+)?)\s*$/);
     if(!m){ showToast('Could not read that — paste like "28.1876, -81.5534"'); return; }
-    s.lat=+m[1]; s.lng=+m[2];
+    let lat=+m[1], lng=+m[2];
+    /* The common slip is pasting them the wrong way round. That lands in the
+       Southern Ocean — a legal point, so nothing downstream would object, and
+       the map would quietly zoom out to fit half the planet. Catch it here. */
+    if(!geoOk(lat,lng)){ showToast('That is not a point on Earth — check the numbers','err'); return; }
+    const away    = haversineMi(lat,lng,REGION_CENTER[0],REGION_CENTER[1]);
+    const awaySwap = geoOk(lng,lat) ? haversineMi(lng,lat,REGION_CENTER[0],REGION_CENTER[1]) : Infinity;
+    if(away>500 && awaySwap<500){
+      if(confirm(`Those look swapped — ${lat}, ${lng} is ${Math.round(away)} miles from ${REGION}.\n\nUse ${lng}, ${lat} instead?`)){
+        const t=lat; lat=lng; lng=t;
+      }
+    }
+    s.lat=lat; s.lng=lng;
     persistSubs(); root.innerHTML=''; renderSubs(); showToast('Coordinates set');
   };
   document.getElementById('geo_save').onclick=commit;
@@ -2782,8 +2818,9 @@ function renderSubsMap(fit){
   const curFilter=norm(document.getElementById('subSearch').value);
   if(_subsMapLastFilter!==null && curFilter!==_subsMapLastFilter) fit=true;
   _subsMapLastFilter=curFilter;
-  const located=list.filter(({s})=>subHasGeo(s));
-  const missing=list.length-located.length;
+  const located=list.filter(({s})=>subGeoOk(s));
+  const bad=list.filter(({s})=>subHasGeo(s)&&!subGeoOk(s));
+  const missing=list.length-located.length-bad.length;
   const pts=[];
   for(const {s,i} of located){
     const m=L.circleMarker([+s.lat,+s.lng],{radius:7,color:'#fff',weight:1.5,fillColor:REGION_COLOR,fillOpacity:.92});
@@ -2797,7 +2834,16 @@ function renderSubsMap(fit){
     subsMapLayer.addLayer(m);
     pts.push([+s.lat,+s.lng]);
   }
-  if(subsMapInfoEl) subsMapInfoEl.innerHTML=`<b>${located.length}</b> sub${located.length===1?'':'s'} shown${filtered?' (filtered)':''}${missing?` · <span style="color:#d97706">${missing} without coordinates</span>`:''}`;
+  const {keep,out}=fitCluster(pts,500);
+  if(subsMapInfoEl) subsMapInfoEl.innerHTML=`<b>${located.length}</b> sub${located.length===1?'':'s'} shown${filtered?' (filtered)':''}`+
+    `${missing?` · <span style="color:#d97706">${missing} without coordinates</span>`:''}`+
+    `${bad.length?` · <span style="color:#dc2626">${bad.length} with impossible coordinates</span>`:''}`+
+    `${out.length?` · <span style="color:#d97706">${out.length} far outside ${REGION}</span>`:''}`;
+  if(bad.length){
+    logMsg(`Impossible coordinates (not drawn) — ${bad.map(({s})=>`${s.name} [${s.lat}, ${s.lng}]`).join(', ')}`,'err');
+    showToast(`${bad.length} sub(s) have impossible coordinates and were left off the map — see the Log.`,'err');
+  }
+  if(out.length) logMsg(`${out.length} sub(s) sit more than 500 miles from the rest of ${REGION}; the map fits the bulk, not them`,'warn');
   if(pendingSubFocus){
     const p=pendingSubFocus; pendingSubFocus=null;
     setTimeout(()=>{
@@ -2807,7 +2853,7 @@ function renderSubsMap(fit){
       const check=()=>{ if(_focusPin && subsMapInstance.getZoom()<=13){ _focusPin.remove(); _focusPin=null; subsMapInstance.off('zoomend',check); } };
       subsMapInstance.on('zoomend',check);
     },80);
-  } else if(fit&&pts.length) subsMapInstance.fitBounds(pts,{padding:[40,40]});
+  } else if(fit&&keep.length) subsMapInstance.fitBounds(keep,{padding:[40,40]});
 }
 function focusSubOnMap(i){
   const s=SUBS[i]; if(!s||!subHasGeo(s)) return;
@@ -4061,7 +4107,7 @@ window.addEventListener('error',ev=>{
 });
 
 // init
-const APP_VERSION='v23 · 2026-09-09';
+const APP_VERSION='v24 · 2026-09-09';
 document.getElementById('appVer').textContent=APP_VERSION+' · '+REGION;
 // region switcher: each region is its own workspace; a click stores the choice
 // and reloads so the whole app boots into that region's storage
