@@ -1677,14 +1677,14 @@ function renderCodes(){
 }
 function renderLadder(){
   const el=document.getElementById('prioLadder'); if(!el) return;
-  el.innerHTML=[['1','1'],['10','2-10'],['15','11-15'],['20','16-20'],['30','21-30'],['40','31-40'],['60','41-60'],['99','61+']]
+  el.innerHTML=[['10','1-10'],['15','11-15'],['20','16-20'],['30','21-30'],['40','31-40'],['60','41-60'],['99','61+']]
     .map(([v,lbl])=>`<div style="flex:1;background:#${prioColorFor(+v)};padding:7px 2px;text-align:center;font-size:10.5px;
       color:${+v<=20?'#fff':'#333'};font-weight:600">${lbl}</div>`).join('');
 }
 /* Shared by the export and the ladder above so they can never drift apart. */
 function prioColorFor(n){
   if(!isFinite(n)) return '';
-  return n<=1?'FF0000' : n<=10?'FF5A5A' : n<=15?'FF7A00' : n<=20?'FFB055'
+  return n<=10?'FF0000' : n<=15?'FF7A00' : n<=20?'FFB055'
     : n<=30?'FFE000' : n<=40?'FFEB80' : n<=60?'FFF5C2' : 'FFFFFF';
 }
 function wireTaskSettings(){
@@ -4107,7 +4107,7 @@ window.addEventListener('error',ev=>{
 });
 
 // init
-const APP_VERSION='v24 · 2026-09-09';
+const APP_VERSION='v25 · 2026-09-09';
 document.getElementById('appVer').textContent=APP_VERSION+' · '+REGION;
 // region switcher: each region is its own workspace; a click stores the choice
 // and reloads so the whole app boots into that region's storage
