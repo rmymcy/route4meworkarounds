@@ -708,8 +708,21 @@ svg.leaflet-image-layer.leaflet-interactive path {
   button.danger:hover{background:var(--err-bg)}
   button.small{padding:5px 10px;font-size:12px}
   .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
-  .drop{border:2px dashed var(--line);border-radius:12px;padding:34px;text-align:center;color:var(--muted);transition:.15s;background:#fbfcfe}
-  .drop.drag{border-color:var(--brand);background:#eff4ff;color:var(--brand)}
+  .drop{border:2px dashed var(--line);border-radius:14px;padding:30px 20px;text-align:center;color:var(--muted);
+    transition:.15s;background:#fbfcfe;cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:210px}
+  .drop:hover{border-style:solid}
+  .drop .dicon{font-size:30px;line-height:1;margin-bottom:10px}
+  .drop .dtitle{font-size:15.5px;font-weight:700;color:var(--ink)}
+  .drop .dsub{font-size:12.5px;margin-top:5px}
+  .drop .dname{font-size:12px;margin-top:12px;font-weight:600}
+  /* Sage green going out */
+  .drop.sage{border-color:#86efac;background:#f2fdf5;color:#3f6f52}
+  .drop.sage .dicon{color:#16a34a}
+  .drop.sage:hover,.drop.sage.drag{border-color:#16a34a;background:#e7fbee}
+  /* Route4Me blue coming back, their orange on the mark */
+  .drop.r4m{border-color:#bfdbfe;background:#f1f6ff;color:#4a6285}
+  .drop.r4m .dicon{color:#ea580c}
+  .drop.r4m:hover,.drop.r4m.drag{border-color:#2563eb;background:#e6efff}
   .drop b{color:var(--ink)}
   input[type=text],input[type=number],input[type=search]{font:inherit;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:#fff;color:var(--ink);width:100%}
   input:focus{outline:2px solid #bfd3ff;border-color:var(--brand)}
@@ -756,7 +769,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
   .muted{color:var(--muted)}
   .hide{display:none}
   /* modal */
-  .backdrop{position:fixed;inset:0;background:rgba(16,24,40,.45);display:flex;align-items:center;justify-content:center;z-index:50;padding:20px}
+  .backdrop{position:fixed;inset:0;background:rgba(16,24,40,.45);display:flex;align-items:center;justify-content:center;z-index:2000;padding:20px}
   .modal{background:var(--panel);border-radius:14px;max-width:640px;width:100%;max-height:86vh;overflow:auto;box-shadow:0 20px 40px rgba(16,24,40,.25)}
   .modal .mh{padding:18px 22px;border-bottom:1px solid var(--line)}
   .modal .mh h3{margin:0;font-size:16px}
@@ -792,7 +805,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
     background:#f8fafc;border:1px solid var(--line);border-radius:10px;padding:12px}
   .wnum{flex:0 0 22px;height:22px;border-radius:50%;background:var(--brand);color:#fff;font-size:12px;font-weight:700;
     display:inline-flex;align-items:center;justify-content:center;margin-top:1px}
-  .toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%);background:#111827;color:#fff;padding:11px 18px;border-radius:10px;font-size:13px;box-shadow:0 8px 24px rgba(0,0,0,.25);z-index:80;opacity:0;transition:.2s}
+  .toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%);background:#111827;color:#fff;padding:11px 18px;border-radius:10px;font-size:13px;box-shadow:0 8px 24px rgba(0,0,0,.25);z-index:2100;opacity:0;transition:.2s}
   .toast.show{opacity:1}
   .toast.warn{background:#b45309}
   .toast.err{background:#b91c1c}
@@ -897,27 +910,24 @@ svg.leaflet-image-layer.leaflet-interactive path {
     </div>
     <div class="split">
       <div class="card">
-        <h2>Send out &mdash; Sage export (file01)</h2>
-        <div id="drop" class="drop">
-          <p style="margin:0 0 8px"><b>Drag &amp; drop</b> the Sage CSV here, or</p>
-          <button class="primary" id="pickBtn">Choose file&hellip;</button>
+        <div id="drop" class="drop sage">
+          <div class="dicon">&#11015;</div>
+          <div class="dtitle">Drop the Sage export</div>
+          <div class="dsub">or click to choose a file</div>
+          <div id="fileName" class="dname"></div>
+          <button id="pickBtn" class="hide"></button>
           <input type="file" id="file" accept=".csv,text/csv" class="hide">
-          <p id="fileName" class="muted" style="margin:12px 0 0"></p>
         </div>
       </div>
       <div class="card" style="margin-bottom:18px">
-        <h2>Bring back &mdash; Route4Me export (file03)</h2>
-        <label class="fld">Paired Sage export (file01)</label>
-        <div id="f1box" class="note" style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:14px">
-          <span id="f1status">No file01 loaded yet.</span>
-          <span><button class="small" id="f1pickBtn">Use a different file01&hellip;</button>
-          <input type="file" id="f1file" accept=".csv,text/csv" class="hide"></span>
-        </div>
-        <div id="drop3" class="drop">
-          <p style="margin:0 0 8px"><b>Drag &amp; drop</b> the Route4Me export(s) here &mdash; several merge into one &mdash; or</p>
-          <button class="primary" id="pick3Btn">Choose file(s)&hellip;</button>
+        <div id="drop3" class="drop r4m">
+          <div class="dicon">&#11014;</div>
+          <div class="dtitle">Drop the Route4Me routes</div>
+          <div class="dsub">several merge into one &middot; or click to choose</div>
+          <div id="file3Name" class="dname"></div>
+          <div id="f1status" class="muted" style="font-size:11.5px;margin-top:10px"></div>
+          <button id="pick3Btn" class="hide"></button>
           <input type="file" id="file3" accept=".csv,text/csv" multiple class="hide">
-          <p id="file3Name" class="muted" style="margin:12px 0 0"></p>
         </div>
         <div id="bringResult" class="row hide" style="margin-top:14px;align-items:center;gap:10px;flex-wrap:wrap">
           <button class="primary" id="download4Btn">Download Sage import (file04)</button>
@@ -935,6 +945,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
         <button class="small" id="restoreBtn">Restore removed</button>
         <button class="small" id="winBtn" title="give the selected jobs a time of day they have to happen in">&#9200; Time window&hellip;</button>
         <button class="small" id="thBtn" title="mark the selected jobs as townhomes — attached units take less time on site">TH</button>
+        <button class="small" id="rushBtn" title="flag the selected jobs at the same priority as a Sage rush letter">&#9873; Rush</button>
         <span class="muted grow" id="trimCount"></span>
         <button class="small" id="prioBtn" title="task service times and priority live in Settings → Tasks">Tasks&hellip;</button>
         <button class="small" id="colsBtn" title="choose which columns go to Route4Me (core: Alias, Lat, Long, Svc Job Num)">Columns&hellip;</button>
@@ -978,10 +989,14 @@ svg.leaflet-image-layer.leaflet-interactive path {
         <button class="primary small" id="taskAdd">Add</button>
         <button class="small" id="taskReset" style="margin-left:auto">Reset to standard</button>
       </div>
-      <div class="row" style="margin-top:12px;padding-top:12px;border-top:1px solid var(--line);gap:8px;align-items:center;flex-wrap:wrap">
-        <label class="muted" style="font-size:12.5px;display:flex;align-items:center;gap:7px">Townhomes take
-          <input type="number" id="thDiv" min="1" step="0.1" style="width:80px;text-align:center"> &times; less time on site</label>
-        <span class="muted" style="font-size:11.5px" id="thHint"></span>
+      <div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--line)">
+        <div class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.06em;font-weight:600;margin-bottom:4px">Build types</div>
+        <div class="muted" style="font-size:11.5px;margin-bottom:8px">Sage sends a <b>BuildType</b> letter on each job. Attached units go quicker,
+          so the on-site time above is scaled by these. 100% means no change.</div>
+        <div class="tablewrap"><table>
+          <thead><tr><th style="width:70px">Letter</th><th>Kind of build</th><th style="width:130px">% of normal time</th><th style="width:130px">In this file</th></tr></thead>
+          <tbody id="buildBody"></tbody>
+        </table></div>
       </div>
       <p class="muted" id="taskCount" style="margin:10px 2px 0"></p>
     </div>
@@ -1469,6 +1484,9 @@ const JOB_WINDOWS=new Map();
    unit than on ten detached lots. Marked per job — the same subdivision can hold
    both — and keyed by Svc Job Num like the windows. */
 const JOB_TH=new Set();
+/* A job the dispatcher flags by hand, scored exactly as a Sage letter would be.
+   Same store shape as the townhome marks, keyed by Svc Job Num. */
+const JOB_RUSH=new Set();
 
 function findCol(header, name){
   const target=norm(name);
@@ -1523,7 +1541,20 @@ function openColsModal(){
    kind of work, and are set per job on the Dispatch page. Stored per market. */
 const K_PRIOMX=RK+'priomatrix_v2';       // families — superseded, read once to migrate
 const K_TASKMX=RK+'taskmatrix_v1';
-const TH_DEFAULT='2.5';                  // townhome jobs take this much less time on site
+/* Sage sends a BuildType letter. Most kinds of build take the normal time; a
+   duplex is quicker and a townhome much quicker, because the units are attached.
+   Held as a percentage of the task's on-site time so every row reads the same
+   way and the ones that do nothing yet are visibly there. */
+const BUILD_DEFAULT=[
+  {code:'',  label:'Single family',  pct:'100'},
+  {code:'A', label:'Amenity center', pct:'100'},
+  {code:'C', label:'Condo',          pct:'100'},
+  {code:'D', label:'Duplex',         pct:'70'},
+  {code:'M', label:'Model',          pct:'100'},
+  {code:'T', label:'Townhome',       pct:'40'}
+];
+const TH_CODE='T';                       // what the manual TH button marks a job as
+const TH_RUSH_CODE='R';                  // the letter the manual Rush button borrows its value from
 const TASK_DEFAULT=[
   {name:'ENV W\\ELEV STK', svc:''},
   {name:'GRADE STAKING',   svc:''},
@@ -1553,11 +1584,23 @@ function loadTaskMx(){
   if(!m||!Array.isArray(m.tasks)) m={tasks:JSON.parse(JSON.stringify(TASK_DEFAULT)),codes:{...CODE_DEFAULT}};
   m.tasks=m.tasks.map(normTask).filter(t=>t.name);
   if(!m.codes||typeof m.codes!=='object') m.codes={...CODE_DEFAULT};
-  if(!(+m.th>0)) m.th=TH_DEFAULT;
+  // an older install stored a townhome divisor; carry it over as a percentage
+  if(!Array.isArray(m.builds)||!m.builds.length){
+    m.builds=JSON.parse(JSON.stringify(BUILD_DEFAULT));
+    const div=+m.th; if(div>1){ const t=m.builds.find(b=>b.code===TH_CODE); if(t) t.pct=String(Math.round(100/div)); }
+  }
+  m.builds=m.builds.map(b=>({code:String(b.code||'').trim().toUpperCase(),
+    label:String(b.label||'').trim()||'(unnamed)', pct:(+b.pct>0?String(+b.pct):'100')}));
+  delete m.th;
   return m;
 }
 function saveTaskMx(m){ return save(K_TASKMX,{tasks:(m.tasks||[]).map(normTask).filter(t=>t.name),
-    codes:m.codes||{...CODE_DEFAULT}, th:(+m.th>0?String(m.th):TH_DEFAULT)}); }
+    codes:m.codes||{...CODE_DEFAULT}, builds:m.builds||JSON.parse(JSON.stringify(BUILD_DEFAULT))}); }
+function buildPct(mx,code){
+  const c=String(code||'').trim().toUpperCase();
+  const row=(mx.builds||[]).find(b=>b.code===c);
+  return row ? (+row.pct||100) : 100;      // an unknown letter changes nothing
+}
 function taskIndex(m){ const by={}; for(const t of m.tasks) by[norm(t.name)]=t; return by; }
 function prioMxActive(mx){ return Object.keys(mx.codes||{}).length>0; }
 function loadPrioMx(){ return loadTaskMx(); }   // old name, current data
@@ -1585,6 +1628,15 @@ function unmappedTasks(mx){
 }
 /* How many jobs in the loaded file each task covers — shown beside the row so
    the manager can see which settings actually matter today. */
+function buildTypeCounts(){
+  const out=new Map();
+  if(!jobsHeader) return out;
+  const i=findCol(jobsHeader,'BuildType'); if(i<0) return out;
+  for(const r of jobsRows){ if(r.removed) continue;
+    const k=String(r.cells[i]==null?'':r.cells[i]).trim().toUpperCase();
+    out.set(k,(out.get(k)||0)+1); }
+  return out;
+}
 function taskJobCounts(){
   const out=new Map();
   if(!jobsHeader) return out;
@@ -1624,13 +1676,22 @@ function renderTasks(){
         </div></div>`
     : `<div class="muted" style="font-size:12px;margin-bottom:12px">&#10003; Every task in the loaded file has a row.</div>`;
 
-  const dv=document.getElementById('thDiv');
-  if(dv){
-    dv.value=TASKMX.th||TH_DEFAULT;
+  const bb=document.getElementById('buildBody');
+  if(bb){
+    const bcount=buildTypeCounts();
     const sample=TASKMX.tasks.find(t=>t.svc!==''&&isFinite(+t.svc));
-    document.getElementById('thHint').textContent = sample
-      ? `${sample.name} ${sample.svc} min \u2192 ${Math.max(1,Math.round(+sample.svc/(+dv.value||1)))} min when marked TH`
-      : 'Set an on-site time above to see the effect.';
+    bb.innerHTML=TASKMX.builds.map((b,bi)=>{
+      const n=bcount.get(b.code)||0;
+      const eg=sample?`${Math.max(1,Math.round(+sample.svc*(+b.pct||100)/100))} min`:'';
+      return `<tr>
+        <td style="font-family:ui-monospace,Menlo,Consolas,monospace;font-weight:700">${b.code?esc(b.code):'<span class="muted">(blank)</span>'}</td>
+        <td>${esc(b.label)}</td>
+        <td><input type="number" min="1" max="100" data-bpct="${bi}" value="${esc(b.pct)}"
+              style="width:70px;padding:4px 2px;font-size:12.5px;text-align:center;border:1px solid var(--line);border-radius:6px">
+            ${eg?`<span class="muted" style="font-size:11px;margin-left:6px">${eg}</span>`:''}</td>
+        <td class="muted" style="font-size:12px">${n?`${n} job${n===1?'':'s'}`:'—'}</td>
+      </tr>`;
+    }).join('');
   }
   document.getElementById('taskCount').textContent=
     `${TASKMX.tasks.length} task${TASKMX.tasks.length===1?'':'s'}`+
@@ -1686,15 +1747,17 @@ function wireTaskSettings(){
   };
   document.getElementById('taskAdd').onclick=addTask;
   document.getElementById('taskNew').addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); addTask(); } });
-  const dv=document.getElementById('thDiv');
-  dv.onchange=()=>{ const v=+dv.value;
-    if(!(v>0)){ showToast('That has to be a number above zero','err'); dv.value=TASKMX.th||TH_DEFAULT; return; }
-    commitTasks(); TASKMX.th=String(v); saveTaskMx(TASKMX); renderTasks();
-    showToast(`Townhome jobs now take ${v}\u00d7 less time on site`);
-  };
+  document.getElementById('buildBody').addEventListener('change',e=>{
+    const inp=e.target.closest('[data-bpct]'); if(!inp) return;
+    const v=+inp.value, b=TASKMX.builds[+inp.dataset.bpct];
+    if(!(v>0&&v<=100)){ showToast('A percentage between 1 and 100','err'); inp.value=b.pct; return; }
+    commitTasks(); b.pct=String(v); saveTaskMx(TASKMX); renderTasks();
+    showToast(`${b.label} jobs now take ${v}% of the normal on-site time`);
+  });
   document.getElementById('taskReset').onclick=()=>{
     if(!confirm('Reset every task to the standard AllPoints setup? Your service times and priority numbers will be lost.')) return;
-    TASKMX={tasks:JSON.parse(JSON.stringify(TASK_DEFAULT)),codes:{R:'1'}};
+    TASKMX={tasks:JSON.parse(JSON.stringify(TASK_DEFAULT)),codes:{...CODE_DEFAULT},
+      builds:JSON.parse(JSON.stringify(BUILD_DEFAULT))};
     saveTaskMx(TASKMX); renderTasks(); showToast('Tasks reset to standard');
   };
   document.getElementById('pmCodeAdd').onclick=()=>{
@@ -1749,15 +1812,19 @@ function buildFile02(rows){
   /* Only carry the Priority and Color columns when a job in THIS file is
      actually flagged. A column of blanks tells Route4Me nothing and clutters
      the upload — same rule as service time and time windows. */
-  const prioOn = iPrio01>=0 && prioMxActive(PRIOMX) && rows.slice(1).some(r=>{
+  const prioOn = prioMxActive(PRIOMX) && (JOB_RUSH.size>0 || (iPrio01>=0 && rows.slice(1).some(r=>{
     const pc=String(r[iPrio01]||'').trim().toUpperCase();
     return pc && codes[pc]!=null;
-  });
+  })));
   /* Only a letter Sage put in its Priority column earns a priority. Anything
      else ships blank, which leaves Route4Me free to sequence by drive time —
      priority on every stop would make it sequence by priority instead. */
   const prioSkipped=new Map();
+  const rushVal=()=>{ const c=codes[TH_RUSH_CODE]!=null?TH_RUSH_CODE:Object.keys(codes)[0];
+    return c!=null&&codes[c]!=null?String(codes[c]):null; };
   const prioFor=cells=>{
+    const key=iSvc>=0?String(cells[iSvc]||'').trim():'';
+    if(key&&JOB_RUSH.has(key)){ const v=rushVal(); if(v!=null){ rushN++; return {v,rush:true}; } }
     const pc=iPrio01>=0?String(cells[iPrio01]||'').trim().toUpperCase():'';
     if(!pc) return null;
     if(codes[pc]!=null){ rushN++; return {v:String(codes[pc]),rush:true}; }
@@ -1768,13 +1835,15 @@ function buildFile02(rows){
   /* On-site minutes and a per-order time window only earn a column when
      something actually carries them, so a market that uses neither still gets
      the same lean upload it had before. */
-  const thDiv=+(PRIOMX.th||TH_DEFAULT)||1;
+  const iBuild=findCol(header,'BuildType');
+  /* A job marked TH by hand is treated as a townhome whatever Sage said — the
+     dispatcher is looking at the work and Sage's letter may be missing or wrong. */
   const svcOf=cells=>{
     const t=TASK_BY[norm(cells[iTask])];
     if(!t||t.svc===''||!isFinite(+t.svc)) return '';
     const key=iSvc>=0?String(cells[iSvc]||'').trim():'';
-    const th=key&&JOB_TH.has(key);
-    return String(th ? Math.max(1,Math.round(+t.svc/thDiv)) : +t.svc);
+    const code=(key&&JOB_TH.has(key)) ? TH_CODE : (iBuild>=0?cells[iBuild]:'');
+    return String(Math.max(1,Math.round(+t.svc*buildPct(PRIOMX,code)/100)));
   };
   const svcOn = iTask>=0 && (PRIOMX.tasks||[]).some(t=>t.svc!==''&&isFinite(+t.svc));
   const winOf=cells=>{ const k=iSvc>=0?String(cells[iSvc]||'').trim():''; return k?JOB_WINDOWS.get(k)||null:null; };
@@ -1831,7 +1900,11 @@ function buildFile02(rows){
     }
     const w=winOn?winOf(cells):null;
     if(w) windowed++;
-    if(svcOn && iSvc>=0 && JOB_TH.has(String(cells[iSvc]||'').trim())) thN++;
+    if(svcOn){
+      const key=iSvc>=0?String(cells[iSvc]||'').trim():'';
+      const code=(key&&JOB_TH.has(key)) ? TH_CODE : (iBuild>=0?cells[iBuild]:'');
+      if(buildPct(PRIOMX,code)!==100) thN++;
+    }
     out.push(reshape(cells, lat, lng, aliasFor(cells, m.sub?m.sub.name:''), prio, color, '',
       {svc:svcOn?svcOf(cells):'', winf:w?w.from:'', wint:w?w.to:''}));
   }
@@ -1861,7 +1934,7 @@ function buildFile02(rows){
 
   const outName=`Route4Me upload ${todayStamp()}.csv`;
   return {rows:out, outName, prioOn, prioApplied, rushN, unmatched, noCoords, matched, jobs,
-          depots, prioSkipped, svcOn, winOn, windowed, thN, thDiv};
+          depots, prioSkipped, svcOn, winOn, windowed, thN};
 }
 function isActive(cw){ return cw.active!==false; } // default on unless explicitly false
 function todayStamp(){ const d=new Date(); const p=n=>String(n).padStart(2,'0'); return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`; }
@@ -1883,7 +1956,7 @@ const K_TRIM=RK+'trimstate_v1';   // which rows were trimmed, so a refresh keeps
 const K_UITAB=RK+'uitab_v1';     // which page (Dispatch/Settings) was open
 function persistTrim(){ try{ save(K_TRIM,{name:file01Name||'',
     removed:jobsRows.filter(r=>r.removed).map(r=>r.id),
-    wins:[...JOB_WINDOWS.entries()], th:[...JOB_TH]}); }catch(e){} }
+    wins:[...JOB_WINDOWS.entries()], th:[...JOB_TH], rush:[...JOB_RUSH]}); }catch(e){} }
 function loadFile01ForReview(text,name,restoring){
   let rows;
   try{ rows=parseCSV(text).filter(r=>r.some(c=>String(c).trim()!=='')); }
@@ -1894,7 +1967,7 @@ function loadFile01ForReview(text,name,restoring){
   jobsSel=new Set(); jobsAnchor=null; jobsSort={i:null,dir:1};
   ONE_TIME_SUB.clear();   // one-time sub matches are per-import-run
   JOB_WINDOWS.clear();    // and so are time windows — they belong to today's orders
-  JOB_TH.clear();
+  JOB_TH.clear(); JOB_RUSH.clear();
   // display columns (by header name; skipped silently if absent)
   const want=[['Svc Job Num','text'],['Received Date','date'],['Schedule_Date','date'],
     ['Description Of Problem','text'],['Status Code','text'],['Priority','text'],
@@ -1954,10 +2027,12 @@ function scanUnmatchedAtImport(){
   if(!unmatched.size) return;
   openUnmatchedModal(unmatched, scanUnmatchedAtImport, {mode:'import'});
 }
-function isTH(r){
-  if(!jobsHeader||!JOB_TH.size) return false;
+function isTH(r){ return jobFlagged(r,JOB_TH); }
+function isRush(r){ return jobFlagged(r,JOB_RUSH); }
+function jobFlagged(r,set){
+  if(!jobsHeader||!set.size) return false;
   const i=findCol(jobsHeader,'Svc Job Num'); if(i<0) return false;
-  return JOB_TH.has(String(r.cells[i]||'').trim());
+  return set.has(String(r.cells[i]||'').trim());
 }
 function jobsView(){
   const v=jobsRows.filter(r=>!r.removed);
@@ -1987,6 +2062,7 @@ function renderJobs(){
     `<td><input type="checkbox" data-cb="${r.id}" ${jobsSel.has(r.id)?'checked':''}></td>`+
     jobsCols.map((c,ci)=>`<td>${jobCellHtml(c.name, String(r.cells[c.i]==null?'':r.cells[c.i]).trim())}`+
       (ci===0&&isTH(r)?' <span class="badge sec" title="townhome — reduced on-site time">TH</span>':'')+
+      (ci===0&&isRush(r)?' <span class="badge err" title="flagged by hand">RUSH</span>':'')+
       `</td>`).join('')+`</tr>`).join('');
   const removed=jobsRows.filter(r=>r.removed).length;
   const live=jobsRows.filter(r=>!r.removed);
@@ -1994,8 +2070,8 @@ function renderJobs(){
   const cffN=iStatC>=0?live.filter(r=>norm(r.cells[iStatC])==='cff').length:0;
   const rushRe=/^[a-z]{1,3}$/i;
   const rushN=iPrioC>=0?live.filter(r=>rushRe.test(String(r.cells[iPrioC]||'').trim())).length:0;
-  const winN=JOB_WINDOWS.size, thCount=live.filter(isTH).length;
-  document.getElementById('trimCount').textContent=`${view.length} jobs${removed?` · ${removed} removed`:''}${cffN?` · ${cffN} CFF`:''}${rushN?` · ${rushN} rush`:''}${winN?` · ${winN} windowed`:''}${thCount?` · ${thCount} TH`:''} · ${jobsSel.size} selected`;
+  const winN=JOB_WINDOWS.size, thCount=live.filter(isTH).length, rushManual=live.filter(isRush).length;
+  document.getElementById('trimCount').textContent=`${view.length} jobs${removed?` · ${removed} removed`:''}${cffN?` · ${cffN} CFF`:''}${rushN?` · ${rushN} rush`:''}${winN?` · ${winN} windowed`:''}${thCount?` · ${thCount} TH`:''}${rushManual?` · ${rushManual} flagged`:''} · ${jobsSel.size} selected`;
   document.getElementById('removeSelBtn').textContent=`Remove selected (${jobsSel.size})`;
   const all=document.getElementById('jobsAll');
   if(all) all.checked = view.length>0 && view.every(r=>jobsSel.has(r.id));
@@ -2084,7 +2160,7 @@ function finishExport(res){
   if(res.noCoords.size) logMsg(`Dropped — no coordinates yet: ${[...res.noCoords].map(([k,n])=>`${k} ×${n}`).join(', ')}`,'warn');
   if(res.depots) logMsg(`Depot rows appended: ${res.depots} working crew start(s)`);
   if(res.svcOn) logMsg(`On-site minutes written as "${SVC_H}" from the task settings`+
-    (res.thN?`; ${res.thN} townhome job(s) divided by ${res.thDiv}`:''));
+    (res.thN?`; ${res.thN} job(s) shortened by their build type`:''));
   if(res.winOn) logMsg(`${res.windowed} job(s) carry a time window ("${WINF_H}"/"${WINT_H}")`);
   downloadFile02Res(res);
   const dropped=res.jobs-res.matched;
@@ -2292,7 +2368,8 @@ function download4(){
 function setFile01(text,name,fromStash){
   file01Text=text; file01Name=name;
   const rows=(text.split(/\r?\n/).filter(l=>l.trim()!=='').length-1);
-  document.getElementById('f1status').innerHTML = `<b>file01:</b> ${esc(name)} &middot; ${rows} job rows${fromStash?' <span class="muted">(from your last Send)</span>':''}`;
+  const el=document.getElementById('f1status');
+  if(el) el.textContent = `paired with ${name} · ${rows} jobs`;
 }
 
 /* ============================ SUB RESOLUTION MODAL (fuzzy review cards) ============================ */
@@ -2672,8 +2749,8 @@ function renderSubsMap(fit){
     const nm=`${c.name||''} ${c.last||''}`.trim()||c.code||'Crew';
     const off=!isActive(c);
     const icon=L.divIcon({className:'',iconSize:[16,16],iconAnchor:[8,8],
-      html:`<div style="width:12px;height:12px;margin:2px;transform:rotate(45deg);background:${off?'#9aa4b2':REGION_COLOR};
-        border:2px solid #fff;box-shadow:0 0 0 1px ${off?'#9aa4b2':REGION_COLOR},0 1px 3px rgba(0,0,0,.4)"></div>`});
+      html:`<div style="width:12px;height:12px;margin:2px;transform:rotate(45deg);background:${off?'#9aa4b2':'#111827'};
+        border:2px solid #fff;box-shadow:0 0 0 1px ${off?'#9aa4b2':'#111827'},0 1px 4px rgba(0,0,0,.5)"></div>`});
     L.marker([+c.lat,+c.lng],{icon,zIndexOffset:900})
       .bindTooltip(`<b>${esc(nm)}</b>${c.code?' · '+esc(c.code):''}${off?'<br><i>not working</i>':''}`,{direction:'top',offset:[0,-8]})
       .addTo(crewMapLayer);
@@ -3397,7 +3474,7 @@ document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{
 });
 // file / drop (file01 -> file02)
 const drop=document.getElementById('drop'), fileInput=document.getElementById('file');
-document.getElementById('pickBtn').onclick=()=>fileInput.click();
+drop.addEventListener('click',e=>{ if(!e.target.closest('button')) fileInput.click(); });
 fileInput.onchange=e=>{ const f=e.target.files[0]; if(f) readFile(f); };
 ;['dragenter','dragover'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add('drag');}));
 ;['dragleave','drop'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove('drag');}));
@@ -3459,6 +3536,7 @@ document.getElementById('genBtn').onclick=()=>{
       const ts=load(K_TRIM,null);
       if(ts && Array.isArray(ts.wins)){ JOB_WINDOWS.clear(); for(const [k,v] of ts.wins) if(k&&v&&v.from&&v.to) JOB_WINDOWS.set(k,v); }
       if(ts && Array.isArray(ts.th)){ JOB_TH.clear(); for(const k of ts.th) if(k) JOB_TH.add(String(k)); }
+      if(ts && Array.isArray(ts.rush)){ JOB_RUSH.clear(); for(const k of ts.rush) if(k) JOB_RUSH.add(String(k)); }
       if(ts && ts.name===(stash.name||'file01.csv') && Array.isArray(ts.removed) && ts.removed.length){
         const ids=new Set(ts.removed);
         jobsRows.forEach(r=>{ if(ids.has(r.id)) r.removed=true; });
@@ -3538,7 +3616,7 @@ document.getElementById('storageBtn').onclick=async()=>{
   root.querySelector('#stgClose').onclick=()=>root.innerHTML='';
 };
 const drop3=document.getElementById('drop3'), file3In=document.getElementById('file3');
-document.getElementById('pick3Btn').onclick=()=>file3In.click();
+drop3.addEventListener('click',e=>{ if(!e.target.closest('button')) file3In.click(); });
 file3In.onchange=e=>{ if(e.target.files.length) read3([...e.target.files]); e.target.value=''; };
 ;['dragenter','dragover'].forEach(ev=>drop3.addEventListener(ev,e=>{e.preventDefault();drop3.classList.add('drag');}));
 ;['dragleave','drop'].forEach(ev=>drop3.addEventListener(ev,e=>{e.preventDefault();drop3.classList.remove('drag');}));
@@ -3560,8 +3638,6 @@ function read3(files){
     runReverse();
   }).catch(()=>showToast('Could not read those files'));
 }
-document.getElementById('f1pickBtn').onclick=()=>document.getElementById('f1file').click();
-document.getElementById('f1file').onchange=e=>{ const f=e.target.files[0]; if(!f)return; const rd=new FileReader(); rd.onload=()=>{ setFile01(rd.result,f.name,false); if(file03Text) runReverse(); }; rd.readAsText(f); };
 document.getElementById('download4Btn').onclick=download4;
 document.getElementById('toastLogBtn').onclick=openToastLog;
 
@@ -3811,6 +3887,21 @@ function openWindowModal(){
 document.getElementById('winBtn').onclick=openWindowModal;
 /* Toggle, not set: if every selected job is already a townhome the button
    clears them, so one control does both directions. */
+document.getElementById('rushBtn').onclick=()=>{
+  if(!jobsHeader){ showToast('Load a Sage export first'); return; }
+  const iSvc=findCol(jobsHeader,'Svc Job Num');
+  if(iSvc<0){ showToast('This file has no Svc Job Num column','err'); return; }
+  const mx=loadTaskMx(), c=mx.codes[TH_RUSH_CODE]!=null?TH_RUSH_CODE:Object.keys(mx.codes)[0];
+  if(c==null){ showToast('No letter codes set up — add one in Settings → Priority','err'); return; }
+  const keys=jobsRows.filter(r=>!r.removed && jobsSel.has(r.id))
+    .map(r=>String(r.cells[iSvc]||'').trim()).filter(Boolean);
+  if(!keys.length){ showToast('Select the jobs to flag first'); return; }
+  const allOn=keys.every(k=>JOB_RUSH.has(k));
+  keys.forEach(k=>allOn?JOB_RUSH.delete(k):JOB_RUSH.add(k));
+  persistTrim(); renderJobs();
+  showToast(allOn ? `${keys.length} job(s) no longer flagged`
+                  : `${keys.length} job(s) flagged at priority ${mx.codes[c]} — same as a Sage "${c}"`);
+};
 document.getElementById('thBtn').onclick=()=>{
   if(!jobsHeader){ showToast('Load a Sage export first'); return; }
   const iSvc=findCol(jobsHeader,'Svc Job Num');
@@ -3821,9 +3912,9 @@ document.getElementById('thBtn').onclick=()=>{
   const allOn=keys.every(k=>JOB_TH.has(k));
   keys.forEach(k=>allOn?JOB_TH.delete(k):JOB_TH.add(k));
   persistTrim(); renderJobs();
-  const div=+(loadTaskMx().th||TH_DEFAULT)||1;
+  const pct=buildPct(loadTaskMx(),TH_CODE);
   showToast(allOn ? `${keys.length} job(s) back to full on-site time`
-                  : `${keys.length} job(s) marked TH — on-site time divided by ${div}`);
+                  : `${keys.length} job(s) marked TH — on-site time cut to ${pct}%`);
 };
 const depotEl=document.getElementById('depotToggle');
 depotEl.checked=DEPOTS_ON;
@@ -3921,7 +4012,7 @@ window.addEventListener('error',ev=>{
 });
 
 // init
-const APP_VERSION='v28 · 2026-09-14';
+const APP_VERSION='v29 · 2026-09-14';
 document.getElementById('appVer').textContent=APP_VERSION+' · '+REGION;
 // region switcher: each region is its own workspace; a click stores the choice
 // and reloads so the whole app boots into that region's storage

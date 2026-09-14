@@ -36,7 +36,8 @@ const svcOf = () => page.evaluate(()=>{
 let st=await svcOf();
 check('every job starts at the task time',st.svc.join(',')==='35,35,35,35,35,35',st.svc.join(','));
 check('none marked yet',st.thN===0);
-check('the divisor defaults to 2.5',st.thDiv===2.5,String(st.thDiv));
+st=await page.evaluate(()=>loadTaskMx().builds.find(b=>b.code==='T').pct);
+check('townhomes default to 40% of normal time',st==='40',st);
 
 // mark three via the toolbar button
 st=await page.evaluate(()=>{
@@ -47,7 +48,7 @@ st=await page.evaluate(()=>{
     badges:document.querySelectorAll('#jobsBody .badge.sec').length };
 });
 check('three jobs marked',st.n===3,`${st.n}`);
-check('the toast says what happened',/3 job\(s\) marked TH — on-site time divided by 2.5/.test(st.toast),st.toast.slice(0,80));
+check('the toast says what happened',/3 job\(s\) marked TH — on-site time cut to 40%/.test(st.toast),st.toast.slice(0,80));
 check('the day summary counts them',/3 TH/.test(st.count),st.count);
 check('marked rows are badged',st.badges===3,`${st.badges} badges`);
 
@@ -74,31 +75,7 @@ st=await page.evaluate(()=>{
 });
 check('a mixed selection turns everything on',st===4,`${st}`);
 
-// the divisor is editable and takes effect
-st=await page.evaluate(async()=>{
-  document.querySelector('.tab[data-tab="settings"]').click();
-  await new Promise(r=>setTimeout(r,200));
-  const dv=document.getElementById('thDiv');
-  const before=dv.value;
-  dv.value='5'; dv.dispatchEvent(new Event('change',{bubbles:true}));
-  await new Promise(r=>setTimeout(r,200));
-  return { before, stored:loadTaskMx().th, hint:document.getElementById('thHint').textContent };
-});
-check('the divisor shows the stored value',st.before==='2.5',st.before);
-check('changing it stores',st.stored==='5',st.stored);
-check('the hint shows the effect',/35 min → 7 min/.test(st.hint),st.hint);
-
-st=await svcOf();
-check('a new divisor changes the export',st.svc.slice(0,4).join(',')==='7,7,7,7',st.svc.join(','));
-
-// a bad divisor is refused
-st=await page.evaluate(async()=>{
-  const dv=document.getElementById('thDiv');
-  dv.value='0'; dv.dispatchEvent(new Event('change',{bubbles:true}));
-  await new Promise(r=>setTimeout(r,150));
-  return { stored:loadTaskMx().th, shown:dv.value, toast:document.getElementById('toast').textContent };
-});
-check('zero is refused and reverted',st.stored==='5'&&st.shown==='5',`${st.stored}/${st.shown}`);
+// (editing the percentages is covered in tests/buildtypes.mjs)
 
 // survives a refresh, and a fresh import clears it
 await page.reload(); await page.waitForSelector('#regionBar .region.active'); await page.waitForTimeout(800);
