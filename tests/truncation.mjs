@@ -90,11 +90,9 @@ const FULL=await page.evaluate(()=>SUBS.find(s=>geoOk(s.lat,s.lng)).name);
 t=await banner(sage([job(FULL,'2538113'),job(FULL,'2538116')],{'Description Of Problem':20}));
 check('a clipped title with room underneath stays quiet',t==='',t.slice(0,120));
 
-// 3. long names cut at a width the aliases can still recover -> heads-up only
+// 3. long names cut at a width the prefix aliases still recover -> say nothing
 t=await banner(sage([job('Plat of Subdivision Surve','2538113'),job(FULL,'2538116')],{'Subdiv Name':25}));
-check('a recoverable cut is a heads-up, not an error',/Heads up/i.test(t)&&!/cutting subdivision names short/i.test(t),t.slice(0,60));
-check('the heads-up says the run is fine',/run is fine/.test(t),t.slice(0,200));
-check('the heads-up quotes the matcher’s own floor',/first 19 characters/.test(t),t.slice(0,200));
+check('a cut the aliases can recover passes without comment',t==='',t.slice(0,160));
 
 // 4. nothing padded to its edge at all
 t=await banner(sage([job(FULL,'2538113'),job(FULL,'2538116')]));

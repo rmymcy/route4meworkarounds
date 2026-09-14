@@ -711,17 +711,15 @@ svg.leaflet-image-layer.leaflet-interactive path {
   .drop{border:2px dashed var(--line);border-radius:14px;padding:30px 20px;text-align:center;color:var(--muted);
     transition:.15s;background:#fbfcfe;cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:210px}
   .drop:hover{border-style:solid}
-  .drop .dicon{font-size:30px;line-height:1;margin-bottom:10px}
   /* One word per box — the colour says which system it is */
   .drop .dtitle{font-size:19px;font-weight:800;letter-spacing:.06em;color:var(--ink)}
   .drop .dname{font-size:12px;margin-top:12px;font-weight:600}
   /* Sage green going out */
   .drop.sage{border-color:#86efac;background:#f2fdf5;color:#3f6f52}
-  .drop.sage .dicon{color:#16a34a}
   .drop.sage:hover,.drop.sage.drag{border-color:#16a34a;background:#e7fbee}
   /* Route4Me blue coming back, their orange on the mark */
   .drop.r4m{border-color:#bfdbfe;background:#f1f6ff;color:#4a6285}
-  .drop.r4m .dicon,.drop.r4m .dtitle{color:#ea580c}
+  .drop.r4m .dtitle{color:#ea580c}
   .drop.r4m:hover,.drop.r4m.drag{border-color:#2563eb;background:#e6efff}
   .drop b{color:var(--ink)}
   input[type=text],input[type=number],input[type=search]{font:inherit;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:#fff;color:var(--ink);width:100%}
@@ -911,7 +909,6 @@ svg.leaflet-image-layer.leaflet-interactive path {
     <div class="split">
       <div class="card">
         <div id="drop" class="drop sage">
-          <div class="dicon">&#11015;</div>
           <div class="dtitle">SAGE</div>
           <div id="fileName" class="dname"></div>
           <button id="pickBtn" class="hide"></button>
@@ -920,7 +917,6 @@ svg.leaflet-image-layer.leaflet-interactive path {
       </div>
       <div class="card" style="margin-bottom:18px">
         <div id="drop3" class="drop r4m">
-          <div class="dicon">&#11014;</div>
           <div class="dtitle">R4Me</div>
           <button id="pick3Btn" class="hide"></button>
           <input type="file" id="file3" accept=".csv,text/csv" multiple class="hide">
@@ -987,8 +983,6 @@ svg.leaflet-image-layer.leaflet-interactive path {
       </div>
       <div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--line)">
         <div class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.06em;font-weight:600;margin-bottom:4px">Build types</div>
-        <div class="muted" style="font-size:11.5px;margin-bottom:8px">Sage sends a <b>BuildType</b> letter on each job. Attached units go quicker,
-          so the on-site time above is scaled by these. 100% means no change.</div>
         <div class="tablewrap"><table>
           <thead><tr><th style="width:70px">Letter</th><th>Kind of build</th><th style="width:130px">% of normal time</th><th style="width:130px">In this file</th></tr></thead>
           <tbody id="buildBody"></tbody>
@@ -1010,8 +1004,6 @@ svg.leaflet-image-layer.leaflet-interactive path {
       <h2>Import</h2>
       <div class="row" style="align-items:center;gap:12px;flex-wrap:wrap">
         <button class="primary" id="importAllBtn">&#8681; Import anything&hellip;</button>
-        <span class="muted" style="font-size:12.5px">Setup files, manager spreadsheets, Geotab zone exports, KMZ/KML site plans, or a whole folder &mdash;
-        the tool works out what each file is.</span>
       </div>
       <div id="kmzStatus" class="note hide" style="margin-top:12px"></div>
       <div class="row" style="align-items:center;gap:12px;margin-top:14px;padding-top:14px;border-top:1px solid var(--line)">
@@ -2015,19 +2007,14 @@ function loadFile01ForReview(text,name,restoring){
       return w ? {n,w,hit:jobsRows.filter(r=>String(r.cells[i]||'').trim().length===w).length} : null;
     }).filter(Boolean);
   const subClip=clipped.find(c=>c.n==='Subdiv Name');
-  const list=clipped.map(c=>`<b>${esc(c.n)}</b> at ${c.w} characters (${c.hit} row${c.hit===1?'':'s'})`).join(', ');
+  // Only the case matching cannot recover from is worth interrupting for. Names
+  // cut at or above TRUNC_MIN still resolve through the prefix aliases, so they
+  // pass without comment.
   if(subClip && subClip.w<TRUNC_MIN){
-    // too short for the prefix aliases to work — matching cannot recover
     warn.className='';
     warn.innerHTML=`<div class="unmatched" style="border-left-color:var(--err);background:var(--err-bg)"><span class="badge err">Sage is cutting subdivision names short</span>
       <div style="margin-top:6px">The <b>Subdiv Name</b> column in this report is only <b>${subClip.w}</b> characters wide, so names arrive cut (${esc(String(jobsRows[0]&&jobsRows[0].cells[findCol(jobsHeader,'Subdiv Name')]||'').trim())}&hellip;).
       Nothing can match the library at that width. Widen the column in the Sage report and export again.</div></div>`;
-  } else if(clipped.length){
-    warn.className='';
-    warn.innerHTML=`<div class="unmatched"><span class="badge warn">Heads up</span>
-      This report pads to fixed widths and some values reach the edge: ${list}.
-      ${subClip?`Subdivision names that long still resolve &mdash; they are matched on their first ${TRUNC_MIN} characters &mdash; and a`:'A'}ddresses are labels only, so the run is fine.
-      Widen ${clipped.length>1?'those columns':'that column'} in the Sage report if you want the full text.</div>`;
   } else if(missingCore.length || jobsCols.length<4){
     // malformed / wrong file: parsed, but barely any expected Sage columns matched
     warn.className='';
@@ -4058,7 +4045,7 @@ window.addEventListener('error',ev=>{
 });
 
 // init
-const APP_VERSION='v32 · 2026-09-14';
+const APP_VERSION='v33 · 2026-09-14';
 document.getElementById('appVer').textContent=APP_VERSION+' · '+REGION;
 // region switcher: each region is its own workspace; a click stores the choice
 // and reloads so the whole app boots into that region's storage
