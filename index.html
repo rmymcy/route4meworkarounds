@@ -988,18 +988,17 @@ svg.leaflet-image-layer.leaflet-interactive path {
     <div class="card">
       <h2>Tasks</h2>
       <div class="muted" style="font-size:12.5px;margin:-4px 0 12px">One row per Sage task name, exactly as it is spelled in
-        <b>Description Of Problem</b>. Each carries how long it takes on site and how its priority behaves.
-        A task with no row here gets a blank Priority &mdash; Sage&rsquo;s own numbers are never passed through.</div>
+        <b>Description Of Problem</b>, with how long that work takes on site. That becomes Route4Me&rsquo;s service time,
+        so its day adds up to something realistic.</div>
       <div id="taskUnmapped"></div>
       <div class="tablewrap" style="max-height:56vh">
         <table id="taskTable">
           <thead><tr>
             <th>Task (as Sage spells it)</th>
-            <th style="width:78px" title="minutes the crew spends on site — becomes Route4Me's service time">On site</th>
-            <th colspan="4" style="text-align:center">Due clock &mdash; how close to the route day</th>
-            <th colspan="4" style="text-align:center">Received clock &mdash; how old the job is</th>
+            <th style="width:110px" title="minutes the crew spends on site — becomes Route4Me's service time">On site (min)</th>
+            <th style="width:130px">In this file</th>
             <th style="width:34px"></th>
-          </tr><tr id="taskSubHead"></tr></thead>
+          </tr></thead>
           <tbody id="taskBody"></tbody>
         </table>
       </div>
@@ -1012,19 +1011,17 @@ svg.leaflet-image-layer.leaflet-interactive path {
     </div>
     <div class="card">
       <h2>Priority</h2>
-      <div class="muted" style="font-size:12.5px;margin:-4px 0 12px">Lower is hotter. A job takes the <b>hottest</b> value its dates
-        reach on either clock above. A letter arriving in Sage&rsquo;s Priority column overrides both.</div>
+      <div class="note" style="margin:-4px 0 14px">Route4Me reads priority as a <b>sequencing</b> instruction: if every stop carries one,
+        it orders the day by priority instead of by drive time. So only jobs Sage flags with a letter get a priority &mdash;
+        everything else ships blank, and Route4Me is left free to optimise the route. Flagged jobs are pinned red.</div>
+      <div class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.06em;font-weight:600;margin-bottom:7px">Letter codes in Sage&rsquo;s Priority column</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center" id="codeWrap"></div>
       <div class="row" style="margin-top:10px;gap:8px;align-items:center">
-        <input type="text" id="pmCodeK" placeholder="code" maxlength="3" style="width:70px">
-        <input type="number" id="pmCodeV" placeholder="priority" style="width:100px">
+        <input type="text" id="pmCodeK" placeholder="letter" maxlength="3" style="width:80px">
+        <input type="number" id="pmCodeV" placeholder="priority" style="width:110px">
         <button class="small" id="pmCodeAdd">Add code</button>
       </div>
-      <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line)">
-        <div class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.06em;font-weight:600;margin-bottom:6px">Colour ladder</div>
-        <div id="prioLadder" style="display:flex;gap:0;border-radius:8px;overflow:hidden;max-width:520px"></div>
-        <div class="muted" style="font-size:11px;margin-top:5px">The Color column Route4Me pins each stop with, hottest to coolest.</div>
-      </div>
+      <div class="muted" style="font-size:11.5px;margin-top:8px">A letter Sage sends that has no code here is left blank and reported in the Log.</div>
     </div>
     <div class="card">
       <h2>Import</h2>
@@ -1525,38 +1522,31 @@ function openColsModal(){
 }
 
 /* ==== TASK SETTINGS ====
-   Every Sage task name stands on its own row and carries what the tool knows
-   about that kind of work:
+   A task row carries one thing: how long that kind of work takes on site, in
+   minutes, which becomes Route4Me's service time.
 
-     svc       how long it takes on site, in minutes -> Route4Me service time
-     due[4]    priority by how close Schedule_Date is to the route day
-     recv[4]   priority by how old the job is
+   Priority is deliberately NOT here and is deliberately sparse. Route4Me treats
+   priority as a sequencing instruction — give every stop a priority and it
+   orders the day by priority instead of minimising drive time, which defeats
+   the point of routing. So only jobs Sage flags with a letter in its Priority
+   column get one; everything else ships blank and Route4Me is free to optimise.
+   Sage's own numeric priorities are never passed through.
 
-   A job takes the HOTTEST (lowest) value the two clocks offer; a blank bucket
-   contributes nothing, and a task with no row gets a blank Priority — Sage's
-   own numbers are never passed through. Sage Priority "R" (rush) = 1, over
-   everything. Time windows are NOT here: they belong to an individual order,
-   not to a kind of work, and are set per job on the Dispatch page.
-   Stored per market. */
+   Time windows are not here either: they belong to a single order, not to a
+   kind of work, and are set per job on the Dispatch page. Stored per market. */
 const K_PRIOMX=RK+'priomatrix_v2';       // families — superseded, read once to migrate
 const K_TASKMX=RK+'taskmatrix_v1';
-const PRIO_DUE=['Late','Due that day','1 day before','2+ before'];
-const PRIO_RECV=['Received day','+1 day','+2 days','+3 or more'];
-const blank4=()=>['','','',''];
 const TASK_DEFAULT=[
-  {name:'ENV W\\ELEV STK', svc:'', due:['10','15','',''],    recv:blank4()},
-  {name:'GRADE STAKING',   svc:'', due:['10','15','',''],    recv:blank4()},
-  {name:'RE-GRADE STAKE',  svc:'', due:['10','15','',''],    recv:blank4()},
-  {name:'FORM SURVEY',     svc:'', due:['10','10','15','40'], recv:blank4()},
-  {name:'SIGNED SLAB SVY', svc:'', due:['20','15','15',''],   recv:['50','50','40','30']},
-  {name:'FINAL SVY SWALE', svc:'', due:['20','15','30',''],   recv:['60','60','60','50']}
+  {name:'ENV W\\ELEV STK', svc:''},
+  {name:'GRADE STAKING',   svc:''},
+  {name:'RE-GRADE STAKE',  svc:''},
+  {name:'FORM SURVEY',     svc:''},
+  {name:'SIGNED SLAB SVY', svc:''},
+  {name:'FINAL SVY SWALE', svc:''}
 ];
+const CODE_DEFAULT={R:'5'};              // rush; more letters can be added
 function normTask(t){
-  const o={name:String((t&&t.name)||'').trim(), svc:String((t&&t.svc)||'').trim(), due:blank4(), recv:blank4()};
-  for(const k of ['due','recv']) for(let i=0;i<4;i++){
-    const v=t&&Array.isArray(t[k])?t[k][i]:''; o[k][i]=v==null?'':String(v).trim();
-  }
-  return o;
+  return {name:String((t&&t.name)||'').trim(), svc:String((t&&t.svc)||'').trim()};
 }
 /* Families are gone — a task carries its own numbers now. Anyone upgrading gets
    their family values copied onto every task that family held, so a matrix
@@ -1566,20 +1556,20 @@ function migrateFamilies(){
   if(!m||!m.fam) return null;
   const out=[];
   for(const f of Object.values(m.fam))
-    for(const t of (f.tasks||[])) out.push(normTask({name:t,due:f.due,recv:f.recv}));
-  return out.length?{tasks:out, codes:(m.codes&&typeof m.codes==='object')?m.codes:{R:'1'}}:null;
+    for(const t of (f.tasks||[])) out.push(normTask({name:t}));
+  return out.length?{tasks:out, codes:(m.codes&&typeof m.codes==='object')?m.codes:{...CODE_DEFAULT}}:null;
 }
 function loadTaskMx(){
   let m=load(K_TASKMX,null);
   if(!m||!Array.isArray(m.tasks)) m=migrateFamilies();
-  if(!m||!Array.isArray(m.tasks)) m={tasks:JSON.parse(JSON.stringify(TASK_DEFAULT)),codes:{R:'1'}};
+  if(!m||!Array.isArray(m.tasks)) m={tasks:JSON.parse(JSON.stringify(TASK_DEFAULT)),codes:{...CODE_DEFAULT}};
   m.tasks=m.tasks.map(normTask).filter(t=>t.name);
-  if(!m.codes||typeof m.codes!=='object') m.codes={R:'1'};
+  if(!m.codes||typeof m.codes!=='object') m.codes={...CODE_DEFAULT};
   return m;
 }
-function saveTaskMx(m){ return save(K_TASKMX,{tasks:(m.tasks||[]).map(normTask).filter(t=>t.name), codes:m.codes||{R:'1'}}); }
+function saveTaskMx(m){ return save(K_TASKMX,{tasks:(m.tasks||[]).map(normTask).filter(t=>t.name), codes:m.codes||{...CODE_DEFAULT}}); }
 function taskIndex(m){ const by={}; for(const t of m.tasks) by[norm(t.name)]=t; return by; }
-function prioMxActive(mx){ return (mx.tasks||[]).some(t=>[...(t.due||[]),...(t.recv||[])].some(x=>x!==''&&x!=null)); }
+function prioMxActive(mx){ return Object.keys(mx.codes||{}).length>0; }
 function loadPrioMx(){ return loadTaskMx(); }   // old name, current data
 
 /* A task is matched by its exact Sage name, so anything spelled differently —
@@ -1621,32 +1611,24 @@ function renderTasks(){
   if(!document.getElementById('taskBody')) return;
   TASKMX=TASKMX||loadTaskMx();
   const counts=taskJobCounts();
-  const sub=document.getElementById('taskSubHead');
-  sub.innerHTML='<th></th><th class="muted" style="font-weight:500;font-size:10.5px">min</th>'+
-    PRIO_DUE.map(b=>`<th class="muted" style="font-weight:500;font-size:10.5px;text-align:center">${esc(b)}</th>`).join('')+
-    PRIO_RECV.map(b=>`<th class="muted" style="font-weight:500;font-size:10.5px;text-align:center">${esc(b)}</th>`).join('')+'<th></th>';
-  const cell=(ti,kind,i,v)=>`<td><input type="number" data-tk="${ti}|${kind}|${i}" value="${esc(v||'')}" placeholder="—"
-    style="width:100%;padding:4px 2px;font-size:12px;text-align:center;border:1px solid var(--line);border-radius:6px"></td>`;
   document.getElementById('taskBody').innerHTML=TASKMX.tasks.map((t,ti)=>{
     const n=counts.get(norm(t.name))||0;
     return `<tr>
       <td><input type="text" data-tname="${ti}" value="${esc(t.name)}"
-            style="width:100%;padding:4px 6px;font-size:12.5px;font-family:ui-monospace,Menlo,Consolas,monospace;border:1px solid var(--line);border-radius:6px">
-          ${n?`<span class="muted" style="font-size:10.5px">${n} job${n===1?'':'s'} in this file</span>`:''}</td>
+            style="width:100%;padding:5px 7px;font-size:12.5px;font-family:ui-monospace,Menlo,Consolas,monospace;border:1px solid var(--line);border-radius:6px"></td>
       <td><input type="number" min="0" data-tsvc="${ti}" value="${esc(t.svc||'')}" placeholder="—"
-            style="width:100%;padding:4px 2px;font-size:12px;text-align:center;border:1px solid var(--line);border-radius:6px"></td>
-      ${t.due.map((v,i)=>cell(ti,'due',i,v)).join('')}
-      ${t.recv.map((v,i)=>cell(ti,'recv',i,v)).join('')}
+            style="width:100%;padding:5px 4px;font-size:12.5px;text-align:center;border:1px solid var(--line);border-radius:6px"></td>
+      <td class="muted" style="font-size:12px">${n?`${n} job${n===1?'':'s'} today`:'—'}</td>
       <td><button class="icon-btn danger" data-tdel="${ti}" title="remove task">&times;</button></td>
     </tr>`;
-  }).join('') || '<tr><td colspan="11" class="muted">No tasks yet — add one below, or import a file01 and use the list above.</td></tr>';
+  }).join('') || '<tr><td colspan="4" class="muted">No tasks yet — add one below, or import a file01 and use the list above.</td></tr>';
 
   const un=unmappedTasks(TASKMX);
   const unJobs=un.reduce((a,b)=>a+b[1],0);
   document.getElementById('taskUnmapped').innerHTML = !jobsHeader ? ''
     : un.length ? `<div style="padding:10px 11px;border:1px solid var(--warn);background:var(--warn-bg);border-radius:8px;margin-bottom:12px">
         <div style="font-size:11px;color:var(--warn);text-transform:uppercase;letter-spacing:.06em;font-weight:700">
-          In this file but not set up &mdash; ${un.length} task${un.length===1?'':'s'}, ${unJobs} job${unJobs===1?'':'s'} getting a blank Priority</div>
+          In this file but not set up &mdash; ${un.length} task${un.length===1?'':'s'}, ${unJobs} job${unJobs===1?'':'s'} with no on-site time</div>
         <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:7px">
           ${un.map(([t,n])=>`<button class="small" data-tadd="${esc(t)}">+ ${esc(t)} <b>&times;${n}</b></button>`).join('')}
         </div></div>`
@@ -1655,7 +1637,7 @@ function renderTasks(){
   document.getElementById('taskCount').textContent=
     `${TASKMX.tasks.length} task${TASKMX.tasks.length===1?'':'s'}`+
     (jobsHeader?` · ${[...counts.keys()].length} in the loaded file`:'');
-  renderCodes(); renderLadder();
+  renderCodes();
 }
 function commitTasks(){
   const b=document.getElementById('taskBody'); if(!b) return;
@@ -1675,18 +1657,10 @@ function renderCodes(){
     || '<span class="muted" style="font-size:12px">No letter codes.</span>';
   w.querySelectorAll('[data-cdel]').forEach(b=>b.onclick=()=>{ commitTasks(); delete TASKMX.codes[b.dataset.cdel]; saveTaskMx(TASKMX); renderTasks(); });
 }
-function renderLadder(){
-  const el=document.getElementById('prioLadder'); if(!el) return;
-  el.innerHTML=[['10','1-10'],['15','11-15'],['20','16-20'],['30','21-30'],['40','31-40'],['60','41-60'],['99','61+']]
-    .map(([v,lbl])=>`<div style="flex:1;background:#${prioColorFor(+v)};padding:7px 2px;text-align:center;font-size:10.5px;
-      color:${+v<=20?'#fff':'#333'};font-weight:600">${lbl}</div>`).join('');
-}
 /* Shared by the export and the ladder above so they can never drift apart. */
-function prioColorFor(n){
-  if(!isFinite(n)) return '';
-  return n<=10?'FF0000' : n<=15?'FF7A00' : n<=20?'FFB055'
-    : n<=30?'FFE000' : n<=40?'FFEB80' : n<=60?'FFF5C2' : 'FFFFFF';
-}
+/* Flagged jobs are red. Nothing else gets a colour — the point of the flag is
+   that it stands out, which it cannot do if every pin is tinted. */
+function prioColorFor(n){ return isFinite(n) ? 'FF0000' : ''; }
 function wireTaskSettings(){
   const body=document.getElementById('taskBody');
   body.addEventListener('change',e=>{ if(e.target.matches('input')) commitTasks(); });
@@ -1770,36 +1744,30 @@ function buildFile02(rows){
   const aliasFor=(cells,subName)=>[iTask>=0?String(cells[iTask]||'').trim():'',
     String(subName||subKeyOf(cells[iSub],iSec>=0?cells[iSec]:'')||'').trim(),
     String(cells[iAddr]||'').trim()].filter(Boolean).join(' - ');
-  // priority matrix (two clocks): hottest of Due-clock and Received-clock values
+  // priority comes from a letter in Sage's own Priority column — nothing else
+  const iPrio01=findCol(header,'Priority');
   const PRIOMX=loadPrioMx();
-  const prioOn=prioMxActive(PRIOMX) && iTask>=0;
-  const iPrio01=findCol(header,'Priority'), iSched01=findCol(header,'Schedule_Date'), iRecv01=findCol(header,'Received Date');
-  const routeDay = sfEl&&sfEl.value
-    ? new Date(+sfEl.value.slice(0,4), +sfEl.value.slice(5,7)-1, +sfEl.value.slice(8,10))
-    : (d=>new Date(d.getFullYear(),d.getMonth(),d.getDate()))(new Date());
   const TASK_BY=taskIndex(PRIOMX);
-  const keyDate=k=>new Date(Math.floor(k/10000),Math.floor(k/100)%100-1,k%100);
-  const dayDiff=(a,b)=>Math.round((a-b)/86400000);
   let prioApplied=0, rushN=0;
-  const codes=PRIOMX.codes||{R:'1'};
-  const prioUnmapped=new Map();
-  const prioFor=cells=>{ // {v, rush} or null -> no priority at all
+  const codes=PRIOMX.codes||{};
+  /* Only carry the Priority and Color columns when a job in THIS file is
+     actually flagged. A column of blanks tells Route4Me nothing and clutters
+     the upload — same rule as service time and time windows. */
+  const prioOn = iPrio01>=0 && prioMxActive(PRIOMX) && rows.slice(1).some(r=>{
+    const pc=String(r[iPrio01]||'').trim().toUpperCase();
+    return pc && codes[pc]!=null;
+  });
+  /* Only a letter Sage put in its Priority column earns a priority. Anything
+     else ships blank, which leaves Route4Me free to sequence by drive time —
+     priority on every stop would make it sequence by priority instead. */
+  const prioSkipped=new Map();
+  const prioFor=cells=>{
     const pc=iPrio01>=0?String(cells[iPrio01]||'').trim().toUpperCase():'';
-    if(pc && codes[pc]!=null){ rushN++; return {v:String(codes[pc]),rush:true}; }
-    const f=TASK_BY[norm(cells[iTask])];
-    if(!f){ const t=String(cells[iTask]||'').trim();
-      if(t) prioUnmapped.set(t,(prioUnmapped.get(t)||0)+1);
-      return null; }
-    const cand=[];
-    if(iSched01>=0){ const k=parseDateKey(cells[iSched01]);
-      if(k!=null){ const d=dayDiff(keyDate(k),routeDay);
-        const v=(f.due||[])[d<0?0:d===0?1:d===1?2:3]; if(v!==''&&v!=null&&isFinite(+v)) cand.push(+v); } }
-    if(iRecv01>=0){ const k=parseDateKey(cells[iRecv01]);
-      if(k!=null){ const age=dayDiff(routeDay,keyDate(k));
-        const v=(f.recv||[])[age<=0?0:age===1?1:age===2?2:3]; if(v!==''&&v!=null&&isFinite(+v)) cand.push(+v); } }
-    return cand.length?{v:String(Math.min(...cand)),rush:false}:null;
+    if(!pc) return null;
+    if(codes[pc]!=null){ rushN++; return {v:String(codes[pc]),rush:true}; }
+    prioSkipped.set(pc,(prioSkipped.get(pc)||0)+1);   // a letter we don't know
+    return null;
   };
-  // marker colour: heat fade, red -> white as priority cools (bare hex, Route4Me's format)
   const prioColor=v=>prioColorFor(+v);
   /* On-site minutes and a per-order time window only earn a column when
      something actually carries them, so a market that uses neither still gets
@@ -1890,7 +1858,7 @@ function buildFile02(rows){
 
   const outName=`Route4Me Upload ${REGION} ${todayStamp()}.csv`;
   return {rows:out, outName, schedFor, prioOn, prioApplied, rushN, unmatched, noCoords, matched, jobs,
-          depots, depotsMoved, prioUnmapped, svcOn, winOn, windowed};
+          depots, depotsMoved, prioSkipped, svcOn, winOn, windowed};
 }
 function isActive(cw){ return cw.active!==false; } // default on unless explicitly false
 function todayStamp(){ const d=new Date(); const p=n=>String(n).padStart(2,'0'); return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`; }
@@ -2248,10 +2216,11 @@ function finishExport(res){
   if(!res.matched){ showToast('Nothing geocoded — nothing to export. Resolve subs or set coordinates first.','err'); return; }
   if(res.schedFor) logMsg(`Scheduled For ${res.schedFor} stamped on every job`);
   if(res.prioOn){
-    logMsg(`Priority matrix: ${res.prioApplied} of ${res.matched} prioritized${res.rushN?` (${res.rushN} letter-coded)`:''}; unmapped left blank`);
-    if(res.prioUnmapped && res.prioUnmapped.size)
-      logMsg(`No priority — these tasks have no row in Settings → Tasks: `+
-        [...res.prioUnmapped].sort((a,b)=>b[1]-a[1]).map(([t,n])=>`${t} ×${n}`).join(', '),'warn');
+    logMsg(`Priority: ${res.prioApplied} of ${res.matched} job(s) flagged by a Sage letter code; the rest left blank so Route4Me sequences by drive time`);
+    if(res.prioSkipped && res.prioSkipped.size)
+      logMsg(`Sage Priority letters with no code set (left blank) — `+
+        [...res.prioSkipped].sort((a,b)=>b[1]-a[1]).map(([c,n])=>`${c} ×${n}`).join(', ')+
+        `. Add them in Settings → Priority if they should be prioritised.`,'warn');
   }
   if(res.unmatched.size) logMsg(`Dropped — unresolved subs: ${[...res.unmatched].map(([k,i])=>`${k||'(blank)'} ×${i.count}`).join(', ')}`,'warn');
   if(res.noCoords.size) logMsg(`Dropped — no coordinates yet: ${[...res.noCoords].map(([k,n])=>`${k} ×${n}`).join(', ')}`,'warn');
@@ -4107,7 +4076,7 @@ window.addEventListener('error',ev=>{
 });
 
 // init
-const APP_VERSION='v25 · 2026-09-09';
+const APP_VERSION='v26 · 2026-09-14';
 document.getElementById('appVer').textContent=APP_VERSION+' · '+REGION;
 // region switcher: each region is its own workspace; a click stores the choice
 // and reloads so the whole app boots into that region's storage
