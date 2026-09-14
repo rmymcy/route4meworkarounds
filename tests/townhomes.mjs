@@ -27,8 +27,9 @@ await page.waitForTimeout(300);
 const svcOf = () => page.evaluate(()=>{
   const res=buildFile02(parseCSV(window.__csv).filter(r=>r.some(c=>String(c).trim()!=='')));
   const h=res.rows[0].map(x=>String(x).trim());
-  const iS=h.indexOf('Service Time'), iJ=h.indexOf('Svc Job Num');
-  return { svc:res.rows.slice(1).map(r=>String(r[iS])), keys:res.rows.slice(1).map(r=>String(r[iJ])),
+  const iS=h.indexOf('Service Time'), iJ=h.indexOf('Svc Job Num'), iD=h.indexOf('Depot');
+  const jobs=res.rows.slice(1).filter(r=>iD<0||String(r[iD])!=='1');   // skip the crew depot rows
+  return { svc:jobs.map(r=>String(r[iS])), keys:jobs.map(r=>String(r[iJ])),
     thN:res.thN, thDiv:res.thDiv };
 });
 

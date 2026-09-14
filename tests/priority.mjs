@@ -49,10 +49,12 @@ const build = async rows => page.evaluate(([h,rs]) => {
   const csv=[h, ...rs].join('\n')+'\n';
   const res=buildFile02(parseCSV(csv).filter(r=>r.some(c=>String(c).trim()!=='')));
   const hh=res.rows[0].map(x=>String(x).trim());
-  const iA=hh.indexOf('Alias'), iP=hh.indexOf('Priority'), iC=hh.indexOf('Color');
+  const iA=hh.indexOf('Alias'), iP=hh.indexOf('Priority'), iC=hh.indexOf('Color'), iD=hh.indexOf('Depot');
+  // crews always ship as depot rows now — they are not jobs, so leave them out
+  const jobs=res.rows.slice(1).filter(r=>iD<0||String(r[iD])!=='1');
   return { header:hh.join('|'), prioOn:res.prioOn, applied:res.prioApplied, rushN:res.rushN,
     skipped:[...(res.prioSkipped||new Map())].map(([c,n])=>`${c}×${n}`),
-    rows:res.rows.slice(1).map(r=>({alias:String(r[iA]), prio:iP>=0?String(r[iP]):null, color:iC>=0?String(r[iC]):null})) };
+    rows:jobs.map(r=>({alias:String(r[iA]), prio:iP>=0?String(r[iP]):null, color:iC>=0?String(r[iC]):null})) };
 }, [HDR, rows]);
 
 // the migration case above deliberately kept R at 1 — reset to defaults here
@@ -69,7 +71,7 @@ const mk = rows => rows.map(r=>r.replace('SUBNAME', SUB));
 
 // a normal day: nothing flagged
 let r = await build(mk([job(1,'',  '09/15/26'), job(2,'1','09/15/26'), job(3,'99','09/10/26')]));
-check('a day with no letters gets no Priority column at all', !/\|Priority\|/.test(r.header), r.header);
+check('a day with no letters gets no Priority column at all', !/Priority/.test(r.header), r.header);
 check('Sage numeric priorities are never passed through', r.rows.every(x=>x.prio===null), JSON.stringify(r.rows.map(x=>x.prio)));
 
 // one rush among many

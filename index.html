@@ -936,45 +936,15 @@ svg.leaflet-image-layer.leaflet-interactive path {
         <button class="small" id="winBtn" title="give the selected jobs a time of day they have to happen in">&#9200; Time window&hellip;</button>
         <button class="small" id="thBtn" title="mark the selected jobs as townhomes — attached units take less time on site">TH</button>
         <span class="muted grow" id="trimCount"></span>
-        <label class="muted" style="font-size:12px;display:flex;align-items:center;gap:6px" title="Adds a &ldquo;Scheduled For&rdquo; column with this date on every job — Route4Me auto-schedules the orders for that day. Clear it to leave the column out. Sage's own Schedule_Date is untouched.">
-          Schedule for <input type="date" id="schedFor" style="padding:5px 8px;font:inherit;font-size:12.5px;border:1px solid var(--line);border-radius:8px"></label>
         <button class="small" id="prioBtn" title="task service times and priority live in Settings → Tasks">Tasks&hellip;</button>
         <button class="small" id="colsBtn" title="choose which columns go to Route4Me (core: Alias, Lat, Long, Svc Job Num)">Columns&hellip;</button>
-        <label class="muted" style="font-size:12px;display:flex;align-items:center;gap:6px"
-          title="On: append each working crew's start as a Depot row, for the one-upload depot run (Option 2). Off: no depots — for territories, which set their own starts.">
-          <input type="checkbox" id="depotToggle"> Crew depots</label>
-        <button class="small" id="crewMapBtn" title="see which crew each job would fall to, and drag starts to change it">&#128506; Crew map</button>
         <button class="primary" id="genBtn">Build Route4Me file &rarr;</button>
       </div>
-      <div class="tablewrap" id="jobsTableWrap" style="max-height:62vh">
+      <div class="tablewrap" style="max-height:62vh">
         <table id="jobsTable" title="Click a header to sort · Shift+click selects a range · Ctrl/Cmd+click toggles">
           <thead><tr id="jobsHead"></tr></thead>
           <tbody id="jobsBody"></tbody>
         </table>
-      </div>
-      <div id="crewMapPanel" class="hide">
-        <div class="note" style="margin-bottom:10px">
-          <b>Option 2 — depots.</b> One upload with every crew's home as a depot; Route4Me assigns the jobs.
-          This is our estimate of that assignment, so you can drag a start and see who picks up what
-          <b>before</b> you upload. Route4Me makes the final call &mdash; check it against file03 when it comes back.
-        </div>
-        <div class="toolbar" style="margin-bottom:10px">
-          <label class="muted" style="font-size:12px;display:flex;align-items:center;gap:6px"
-            title="Route4Me's max stops per route. Leave blank to let it assign freely — which is how a crew ends up with nothing.">
-            Max stops per crew <input type="number" min="1" id="cmCap" style="width:80px;padding:5px 8px;font:inherit;font-size:12.5px;border:1px solid var(--line);border-radius:8px"></label>
-          <span class="muted grow" id="cmSummary"></span>
-          <button class="small" id="cmReset">Reset starts</button>
-          <button class="small primary" id="cmSave">Save moved starts</button>
-        </div>
-        <div style="display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap">
-          <div id="crewMapWrap" style="flex:1 1 520px;min-width:320px;height:60vh;border:1px solid var(--line);border-radius:10px"></div>
-          <div style="flex:0 1 320px;min-width:260px">
-            <div class="tablewrap" style="max-height:60vh">
-              <table><thead><tr><th>Crew</th><th style="width:60px">Jobs</th><th style="width:70px">Avg mi</th></tr></thead>
-              <tbody id="cmCrewBody"></tbody></table>
-            </div>
-          </div>
-        </div>
       </div>
     </div>
 
@@ -1037,6 +1007,11 @@ svg.leaflet-image-layer.leaflet-interactive path {
         the tool works out what each file is.</span>
       </div>
       <div id="kmzStatus" class="note hide" style="margin-top:12px"></div>
+      <div class="row" style="align-items:center;gap:12px;margin-top:14px;padding-top:14px;border-top:1px solid var(--line)">
+        <label class="muted" style="font-size:12.5px;display:flex;align-items:center;gap:7px">
+          <input type="checkbox" id="depotToggle"> Append every working crew as a Depot row</label>
+        <span class="muted" style="font-size:11.5px">This is how Route4Me learns each crew&rsquo;s start location. Leave it on.</span>
+      </div>
       <div class="row" style="align-items:center;gap:12px;margin-top:14px">
         <button class="small" id="storageBtn">Storage&hellip;</button>
         <span class="muted" id="storageLine" style="font-size:12.5px">Checking browser storage&hellip;</span>
@@ -1075,6 +1050,8 @@ svg.leaflet-image-layer.leaflet-interactive path {
       <div class="toolbar">
         <input type="search" class="grow" id="subSearch" placeholder="Filter&hellip;">
         <button class="small" id="subsMapBtn">&#128205; Map</button>
+        <label class="muted mapToggle hide" style="font-size:12px;display:flex;align-items:center;gap:5px"><input type="checkbox" id="mapShowSubs" checked> Subs</label>
+        <label class="muted mapToggle hide" style="font-size:12px;display:flex;align-items:center;gap:5px"><input type="checkbox" id="mapShowCrews" checked> Crews</label>
         <button class="small" id="subsSortBtn" title="toggle list order: alphabetical or grouped by geography">Sort: A&ndash;Z</button>
         <button class="small" id="subsFoldBtn" title="group phases and sections of one subdivision under a folder">Folders</button>
         <button class="primary small" id="addSubBtn">+ Add</button>
@@ -1515,7 +1492,7 @@ function openColsModal(){
   const opts=jobsHeader.map(h=>String(h).trim()).filter(h=>h&&!coreNorm.has(norm(h)));
   const root=document.getElementById('modalRoot');
   root.innerHTML=`<div class="backdrop"><div class="modal" style="max-width:460px"><div class="mh"><h3>Route4Me file columns</h3>
-    <div class="muted" style="font-size:12.5px;margin-top:4px">Core columns always included: <b>Alias (task - subdivision - address), Latitude, Longitude, Svc Job Num, Scheduled For, Priority, Color</b>
+    <div class="muted" style="font-size:12.5px;margin-top:4px">Core columns always included: <b>Alias (task - subdivision - address), Latitude, Longitude, Svc Job Num</b>
     (Svc Job Num is the key that splices the Route4Me export back onto the Sage export). Check anything extra you want visible in Route4Me.</div></div>
   <div class="mb" style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
     ${opts.map(h=>`<label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer">
@@ -1757,14 +1734,6 @@ function buildFile02(rows){
   // be toggled on via "Columns…" (stored per region).
   const iSvc=findCol(header,'Svc Job Num');
   const skip=new Set([findCol(header,LAT_H),findCol(header,LNG_H),findCol(header,DEPOT_H)].filter(x=>x>=0));
-  // "Scheduled For": one uniform date on every job so Route4Me auto-schedules the
-  // orders for that day (its own column — Sage's Schedule_Date is untouched)
-  const sfEl=document.getElementById('schedFor');
-  let schedFor=null;
-  if(sfEl && sfEl.value){
-    const m=sfEl.value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-    if(m) schedFor=`${+m[2]}/${+m[3]}/${m[1]}`;
-  }
   // Alias: task - subdivision - address, e.g. "FORM SURVEY - Laureate Park - 9620 Duflo Way".
   // Uses the full library sub name when matched (Sage's Subdiv Name is truncated).
   const iTask=findCol(header,'Description Of Problem');
@@ -1817,21 +1786,20 @@ function buildFile02(rows){
   plan.push({k:'lat'});
   plan.push({k:'lng'});
   addOrig(iSvc);
-  if(schedFor) plan.push({k:'sched'});
   if(svcOn) plan.push({k:'svc'});
   if(winOn){ plan.push({k:'winf'}); plan.push({k:'wint'}); }
   if(prioOn){ plan.push({k:'prio'}); plan.push({k:'color'}); }
   const extras=loadFile02Cols();
   for(let c=0;c<header.length;c++) if(extras.has(norm(header[c]))) addOrig(c); // chosen extras, original order
   if(DEPOTS_ON) plan.push({k:'depot'});          // last column, as it always was
-  function reshape(cells, latVal, lngVal, schedVal, aliasVal, prioVal, colorVal, depotVal, x){
+  function reshape(cells, latVal, lngVal, aliasVal, prioVal, colorVal, depotVal, x){
     x=x||{};
     return plan.map(s=> s.k==='orig' ? (cells[s.i]==null?'':cells[s.i])
       : s.k==='lat' ? latVal : s.k==='lng' ? lngVal : s.k==='alias' ? aliasVal
       : s.k==='prio' ? prioVal : s.k==='color' ? colorVal : s.k==='depot' ? (depotVal||'')
-      : s.k==='svc' ? (x.svc||'') : s.k==='winf' ? (x.winf||'') : s.k==='wint' ? (x.wint||'') : schedVal);
+      : s.k==='svc' ? (x.svc||'') : s.k==='winf' ? (x.winf||'') : s.k==='wint' ? (x.wint||'') : '');
   }
-  out.push(reshape(header, LAT_H, LNG_H, 'Scheduled For', 'Alias', 'Priority', 'Color', DEPOT_H,
+  out.push(reshape(header, LAT_H, LNG_H, 'Alias', 'Priority', 'Color', DEPOT_H,
     {svc:SVC_H, winf:WINF_H, wint:WINT_H})); // header row
 
   const unmatched=new Map(); // erpName -> {count}
@@ -1864,7 +1832,7 @@ function buildFile02(rows){
     const w=winOn?winOf(cells):null;
     if(w) windowed++;
     if(svcOn && iSvc>=0 && JOB_TH.has(String(cells[iSvc]||'').trim())) thN++;
-    out.push(reshape(cells, lat, lng, schedFor, aliasFor(cells, m.sub?m.sub.name:''), prio, color, '',
+    out.push(reshape(cells, lat, lng, aliasFor(cells, m.sub?m.sub.name:''), prio, color, '',
       {svc:svcOn?svcOf(cells):'', winf:w?w.from:'', wint:w?w.to:''}));
   }
   // same task in the same sub -> identical aliases; number them so every stop
@@ -1882,18 +1850,18 @@ function buildFile02(rows){
      the reverse trip skips straight past them when file03 comes back.
      Starts moved on the crew map count — that's the point of moving them — and
      the caller says so out loud, since an unsaved drag is easy to forget. */
-  let depots=0, depotsMoved=0;
+  let depots=0;
   if(DEPOTS_ON){
-    for(const s of crewStarts()){
+    for(const c of depotCrews()){
       const cells=new Array(header.length).fill('');
-      out.push(reshape(cells, fmtCoord(s.lat), fmtCoord(s.lng), '', `${s.name} Home`, '', '', '1'));
-      depots++; if(s.moved) depotsMoved++;
+      out.push(reshape(cells, fmtCoord(c.lat), fmtCoord(c.lng), `${c.name} Home`, '', '', '1'));
+      depots++;
     }
   }
 
-  const outName=`Route4Me Upload ${REGION} ${todayStamp()}.csv`;
-  return {rows:out, outName, schedFor, prioOn, prioApplied, rushN, unmatched, noCoords, matched, jobs,
-          depots, depotsMoved, prioSkipped, svcOn, winOn, windowed, thN, thDiv};
+  const outName=`Route4Me upload ${todayStamp()}.csv`;
+  return {rows:out, outName, prioOn, prioApplied, rushN, unmatched, noCoords, matched, jobs,
+          depots, prioSkipped, svcOn, winOn, windowed, thN, thDiv};
 }
 function isActive(cw){ return cw.active!==false; } // default on unless explicitly false
 function todayStamp(){ const d=new Date(); const p=n=>String(n).padStart(2,'0'); return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`; }
@@ -1927,10 +1895,6 @@ function loadFile01ForReview(text,name,restoring){
   ONE_TIME_SUB.clear();   // one-time sub matches are per-import-run
   JOB_WINDOWS.clear();    // and so are time windows — they belong to today's orders
   JOB_TH.clear();
-  // fresh default per import: tomorrow (Route4Me auto-schedules orders for this day)
-  const sfEl=document.getElementById('schedFor');
-  if(sfEl){ const d=new Date(Date.now()+86400000), p=n=>String(n).padStart(2,'0');
-    sfEl.value=`${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`; }
   // display columns (by header name; skipped silently if absent)
   const want=[['Svc Job Num','text'],['Received Date','date'],['Schedule_Date','date'],
     ['Description Of Problem','text'],['Status Code','text'],['Priority','text'],
@@ -2043,165 +2007,17 @@ function statusChipHtml(code){
   const cls={cff:'job-status-cff','if':'job-status-if',fv:'job-status-fv',fe:'job-status-fe'}[norm(v)]||'';
   return `<span class="job-status ${cls}">${esc(v)}</span>`;
 }
-/* ==================== OPTION 2: CREW MAP (depot preview) ====================
-   Territories are Option 1 and stay the default: they decide who gets what, but
-   their start is welded in place, so a crew who moves for a week can't be
-   re-pointed quickly. Option 2 is the other trade — every crew's home goes in as
-   a depot on ONE upload, and Route4Me does the assigning. That's what used to
-   scatter jobs onto crews you'd avoid, because nobody could see it coming.
-
-   This is the seeing. We estimate the assignment from the crew starts, draw it,
-   and let a start be dragged so the manager can shape the outcome before
-   uploading rather than discovering it afterwards.
-
-   What we can and cannot predict: assignment is driven by proximity and load, so
-   it approximates well. SEQUENCING — stop order, drive times — is where Route4Me
-   is genuinely clever and unpredictable, and we don't attempt it. Route4Me still
-   makes the real call; file03 is the ground truth to check this against. */
 const K_DEPOTS=RK+'depots_v1';
-/* Option 2 appends each working crew's start as a Depot row, the way the very
-   first version did. Territories set their own starts, so Option 1 leaves it
-   off and ships orders only. */
-let DEPOTS_ON=load(K_DEPOTS,false)===true;
-let PREVIEW_STARTS={};      // crew index -> {lat,lng} dragged this session (not saved until asked)
-let CREW_MAP_ON=false, crewMapInstance=null, crewJobLayer=null, crewPinLayer=null;
-function crewColor(n){ return `hsl(${Math.round(n*137.508)%360} 72% 45%)`; }
-
-/* Every job that has coordinates, resolved the same way the export resolves them. */
-function jobPoints(){
-  if(!jobsHeader) return [];
-  const iSub=findCol(jobsHeader,'Subdiv Name'); if(iSub<0) return [];
-  const iSec=findCol(jobsHeader,'Section'), iAddr=findCol(jobsHeader,'Address 1'),
-        iTask=findCol(jobsHeader,'Description Of Problem');
-  const idx=buildIndex(), out=[];
-  for(const r of jobsRows){
-    if(r.removed) continue;
-    const m=matchSub(r.cells[iSub]!=null?r.cells[iSub]:'', idx, iSec>=0&&r.cells[iSec]!=null?r.cells[iSec]:'');
-    if(!m.sub) continue;
-    const lat=+m.sub.lat, lng=+m.sub.lng;
-    if(!geoOk(lat,lng)) continue;
-    out.push({id:r.id, lat, lng, sub:m.sub.name,
-      addr:iAddr>=0?String(r.cells[iAddr]||'').trim():'', task:iTask>=0?String(r.cells[iTask]||'').trim():''});
-  }
-  return out;
-}
-/* Active crews with a usable start — the dragged position if there is one. */
-function crewStarts(){
-  const out=[];
-  CREWS.forEach((c,i)=>{
-    if(!isActive(c)) return;
-    const mv=PREVIEW_STARTS[i];
-    const lat=mv?mv.lat:+c.lat, lng=mv?mv.lng:+c.lng;
-    if(!geoOk(lat,lng)) return;
-    out.push({i, lat, lng, moved:!!mv, color:crewColor(out.length),
-      name:`${c.name||''} ${c.last||''}`.trim()||c.code||`Crew ${i+1}`, code:c.code||''});
-  });
-  return out;
-}
-/* Nearest-start assignment, optionally capped the way Route4Me caps stops.
-   Jobs are placed in order of how strongly they prefer one crew over the next
-   (their "regret"), so the ones with a clear owner claim it before the
-   toss-ups do — which is roughly how a solver settles them too. */
-function previewAssign(pts, starts, cap){
-  const byCrew=new Map(); starts.forEach(s=>byCrew.set(s.i,[]));
-  const of=new Map();
-  if(!starts.length) return {byCrew, of};
-  const limit=cap>0?cap:Infinity;
-  const ranked=pts.map(p=>{
-    const ds=starts.map(s=>({i:s.i,d:haversineMi(p.lat,p.lng,s.lat,s.lng)})).sort((a,b)=>a.d-b.d);
-    return {p, ds, regret: ds.length>1 ? ds[1].d-ds[0].d : Infinity};
-  }).sort((a,b)=>b.regret-a.regret);
-  for(const r of ranked){
-    let pick=r.ds.find(c=>byCrew.get(c.i).length<limit) || r.ds[0];
-    byCrew.get(pick.i).push(r.p.id);
-    of.set(r.p.id,{crew:pick.i, mi:pick.d});
-  }
-  return {byCrew, of};
-}
-function toggleCrewMap(){
-  CREW_MAP_ON=!CREW_MAP_ON;
-  document.getElementById('crewMapPanel').classList.toggle('hide',!CREW_MAP_ON);
-  document.getElementById('jobsTableWrap').classList.toggle('hide',CREW_MAP_ON);
-  document.getElementById('crewMapBtn').classList.toggle('primary',CREW_MAP_ON);
-  if(CREW_MAP_ON) renderCrewMap(true);
-}
-function renderCrewMap(fit){
-  if(!CREW_MAP_ON) return;
-  const wrap=document.getElementById('crewMapWrap');
-  if(!crewMapInstance && !wrap.offsetWidth){ setTimeout(()=>renderCrewMap(fit),120); return; }
-  if(!crewMapInstance){
-    crewMapInstance=L.map('crewMapWrap',{zoomControl:true}).setView(REGION_CENTER,8);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'© OpenStreetMap',maxZoom:19}).addTo(crewMapInstance);
-    crewJobLayer=L.layerGroup().addTo(crewMapInstance);
-    crewPinLayer=L.layerGroup().addTo(crewMapInstance);
-  }
-  setTimeout(()=>crewMapInstance.invalidateSize(),50);
-  const pts=jobPoints(), starts=crewStarts();
-  const capEl=document.getElementById('cmCap');
-  const cap=capEl&&capEl.value?Math.max(1,+capEl.value):0;
-  const {byCrew,of}=previewAssign(pts,starts,cap);
-  const colorOf=new Map(starts.map(s=>[s.i,s.color]));
-
-  /* Every job in a subdivision sits on that sub's single centroid, so drawing one
-     dot per job stacks 20 jobs invisibly on top of 1. Group by location and size
-     the dot by how much work is there — volume is the thing you're judging when
-     you decide where a start belongs. */
-  crewJobLayer.clearLayers();
-  const bySpot=new Map();
-  for(const p of pts){
-    const k=p.lat+','+p.lng;
-    let g=bySpot.get(k);
-    if(!g){ g={lat:p.lat,lng:p.lng,sub:p.sub,n:0,crews:new Map(),mi:0}; bySpot.set(k,g); }
-    g.n++;
-    const a=of.get(p.id);
-    if(a){ g.crews.set(a.crew,(g.crews.get(a.crew)||0)+1); g.mi=a.mi; }
-  }
-  const nameOf=new Map(starts.map(s=>[s.i,s.name]));
-  for(const g of bySpot.values()){
-    const ranked=[...g.crews.entries()].sort((a,b)=>b[1]-a[1]);
-    const owner=ranked.length?ranked[0][0]:null;
-    const col=owner!=null?colorOf.get(owner):'#9aa4b2';
-    const split=ranked.length>1
-      ? '<br>'+ranked.map(([c,n])=>`${esc(nameOf.get(c)||'?')} ${n}`).join(' · ')
-      : (owner!=null?`<br><b>${esc(nameOf.get(owner)||'')}</b> · ${g.mi.toFixed(1)} mi`:'');
-    L.circleMarker([g.lat,g.lng],{radius:Math.min(16,4+Math.sqrt(g.n)*2.2),
-        color:col,weight:1,fillColor:col,fillOpacity:.7})
-      .bindTooltip(`<b>${esc(g.sub)}</b><br>${g.n} job${g.n===1?'':'s'}${split}`,{sticky:true})
-      .addTo(crewJobLayer);
-  }
-  crewPinLayer.clearLayers();
-  for(const s of starts){
-    const icon=L.divIcon({className:'',iconSize:[18,18],iconAnchor:[9,9],
-      html:`<div style="width:18px;height:18px;border-radius:50%;background:${s.color};border:3px solid #fff;box-shadow:0 0 0 1.5px ${s.color},0 1px 4px rgba(0,0,0,.4)"></div>`});
-    const mk=L.marker([s.lat,s.lng],{icon,draggable:true,zIndexOffset:1000})
-      .bindTooltip(`<b>${esc(s.name)}</b>${s.code?' · '+esc(s.code):''}<br>${byCrew.get(s.i).length} job(s)${s.moved?'<br><i>moved</i>':''}<br><i>drag to try a different start</i>`,{sticky:true})
-      .addTo(crewPinLayer);
-    mk.on('dragend',e=>{ const ll=e.target.getLatLng();
-      PREVIEW_STARTS[s.i]={lat:+ll.lat.toFixed(6),lng:+ll.lng.toFixed(6)};
-      renderCrewMap(false); });
-  }
-  if(fit){
-    const all=pts.map(p=>[p.lat,p.lng]).concat(starts.map(s=>[s.lat,s.lng]));
-    const {keep}=fitCluster(all,500);          // a stray pin must not zoom us to the world
-    if(keep.length) crewMapInstance.fitBounds(keep,{padding:[40,40]});
-  }
-  renderCrewSummary(starts,byCrew,of,pts.length);
-}
-function renderCrewSummary(starts,byCrew,of,total){
-  const rows=starts.map(s=>{
-    const ids=byCrew.get(s.i);
-    const mi=ids.length?ids.reduce((a,id)=>a+of.get(id).mi,0)/ids.length:0;
-    return {s, n:ids.length, mi};
-  }).sort((a,b)=>b.n-a.n);
-  document.getElementById('cmCrewBody').innerHTML=rows.map(r=>`<tr>
-    <td><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${r.s.color};margin-right:7px"></span>${esc(r.s.name)}${r.s.moved?' <span class="badge sec">moved</span>':''}</td>
-    <td>${r.n?r.n:'<span class="badge warn">0</span>'}</td><td>${r.n?r.mi.toFixed(1):'—'}</td></tr>`).join('')
-    || '<tr><td colspan="3" class="muted">No active crews with a start location.</td></tr>';
-  const starved=rows.filter(r=>!r.n).length;
-  const moved=rows.filter(r=>r.s.moved).length;
-  document.getElementById('cmSummary').textContent=
-    `${total} job(s) across ${rows.length} crew(s)`+
-    (starved?` · ${starved} would get nothing`:'')+(moved?` · ${moved} start(s) moved`:'');
+/* Crews always go out as depots — that is the agreed path. The switch stays so
+   it can be turned off deliberately, but it lives in Settings because it is not
+   a daily decision. */
+let DEPOTS_ON=load(K_DEPOTS,true)!==false;
+/* Every working crew with a usable home becomes a Depot row on the upload.
+   Route4Me needs each start location present to route from it, and a crew with
+   no coordinates or a day off has no business being one. */
+function depotCrews(){
+  return CREWS.filter(c=>isActive(c)&&geoOk(c.lat,c.lng))
+    .map(c=>({lat:+c.lat, lng:+c.lng, name:`${c.name||''} ${c.last||''}`.trim()||c.code||'Crew'}));
 }
 const TASK_HUES=new Map(); // per-import golden-angle hues (set in loadFile01ForReview)
 function taskColor(t){
@@ -2257,7 +2073,6 @@ function jobsClick(e){
 }
 function finishExport(res){
   if(!res.matched){ showToast('Nothing geocoded — nothing to export. Resolve subs or set coordinates first.','err'); return; }
-  if(res.schedFor) logMsg(`Scheduled For ${res.schedFor} stamped on every job`);
   if(res.prioOn){
     logMsg(`Priority: ${res.prioApplied} of ${res.matched} job(s) flagged by a Sage letter code; the rest left blank so Route4Me sequences by drive time`);
     if(res.prioSkipped && res.prioSkipped.size)
@@ -2267,7 +2082,7 @@ function finishExport(res){
   }
   if(res.unmatched.size) logMsg(`Dropped — unresolved subs: ${[...res.unmatched].map(([k,i])=>`${k||'(blank)'} ×${i.count}`).join(', ')}`,'warn');
   if(res.noCoords.size) logMsg(`Dropped — no coordinates yet: ${[...res.noCoords].map(([k,n])=>`${k} ×${n}`).join(', ')}`,'warn');
-  if(res.depots) logMsg(`Depot rows appended: ${res.depots} crew start(s)${res.depotsMoved?`, ${res.depotsMoved} moved on the crew map`:''}`);
+  if(res.depots) logMsg(`Depot rows appended: ${res.depots} working crew start(s)`);
   if(res.svcOn) logMsg(`On-site minutes written as "${SVC_H}" from the task settings`+
     (res.thN?`; ${res.thN} townhome job(s) divided by ${res.thDiv}`:''));
   if(res.winOn) logMsg(`${res.windowed} job(s) carry a time window ("${WINF_H}"/"${WINT_H}")`);
@@ -2276,8 +2091,6 @@ function finishExport(res){
   showToast(`Downloaded ${res.outName} — ${res.matched} of ${res.jobs} jobs`+
     (res.depots?` + ${res.depots} depot${res.depots===1?'':'s'}`:'')+
     (dropped?` (${dropped} dropped, see Log)`:''), dropped?'warn':undefined);
-  // an unsaved drag is easy to forget, and it just shipped
-  if(res.depotsMoved) showToast(`${res.depotsMoved} start(s) came from the map and aren't saved — "Save moved starts" to keep them.`,'warn');
 }
 function runConvertRows(header, dataRows, autoDl){
   let res;
@@ -2434,7 +2247,7 @@ function reverseConvert(f03Text, f01Text){
   const routedMissing=[...assign.keys()].filter(s=>!f01svc.has(s)).length;
   const q = s => '"'+String(s==null?'':s).replace(/"/g,'""')+'"';
   const text = outRows.map(r=>r.map(q).join(',')).join('\n')+'\n';
-  return {text, outName:`Sage Import ${REGION} ${todayStamp()}.csv`, st, missingCode, unknownCrew, routedTotal, routedMissing,
+  return {text, outName:`Sage assignment import ${todayStamp()}.csv`, st, missingCode, unknownCrew, routedTotal, routedMissing,
     cffReq, cffText:buildCffText(cffReq)};
 }
 function toMMDDYY(s){
@@ -2798,8 +2611,9 @@ function openGeoEditor(i){
 }
 
 /* ============================ SUBS MAP (Leaflet — all subs + per-sub focus) ============================ */
-let subsMapInstance=null, subsMapLayer=null, subsMapInfoEl=null, _subsMapLastFilter=null, pendingSubFocus=null, _focusPin=null;
+let subsMapInstance=null, subsMapLayer=null, crewMapLayer=null, subsMapInfoEl=null, _subsMapLastFilter=null, pendingSubFocus=null, _focusPin=null;
 function mapAvailable(){ return typeof L!=='undefined'; }
+function setMapToggleVis(on){ document.querySelectorAll('.mapToggle').forEach(e=>e.classList.toggle('hide',!on)); }
 function toggleSubsMap(force){
   const mapWrap=document.getElementById('subsMapWrap'), listWrap=document.getElementById('subsListWrap'), btn=document.getElementById('subsMapBtn');
   const show = force!==undefined ? force : mapWrap.classList.contains('hide');
@@ -2807,6 +2621,7 @@ function toggleSubsMap(force){
   mapWrap.classList.toggle('hide',!show);
   listWrap.classList.toggle('hide',show);
   btn.classList.toggle('primary',show);
+  setMapToggleVis(show);
   if(show) renderSubsMap(true);
 }
 function renderSubsMap(fit){
@@ -2819,6 +2634,7 @@ function renderSubsMap(fit){
     subsMapInstance=L.map('subsMapWrap',{zoomControl:true}).setView(REGION_CENTER,8);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'© OpenStreetMap',maxZoom:19}).addTo(subsMapInstance);
     subsMapLayer=L.layerGroup().addTo(subsMapInstance);
+    crewMapLayer=L.layerGroup().addTo(subsMapInstance);
     const info=L.control({position:'topright'});
     info.onAdd=()=>{ subsMapInfoEl=L.DomUtil.create('div');
       subsMapInfoEl.style.cssText='background:rgba(255,255,255,.93);border:1px solid #d1d1d6;border-radius:6px;padding:5px 9px;font-size:11px;color:#3f3f46;box-shadow:0 1px 4px rgba(0,0,0,.15);line-height:1.5';
@@ -2847,8 +2663,28 @@ function renderSubsMap(fit){
     subsMapLayer.addLayer(m);
     pts.push([+s.lat,+s.lng]);
   }
-  const {keep,out}=fitCluster(pts,500);
-  if(subsMapInfoEl) subsMapInfoEl.innerHTML=`<b>${located.length}</b> sub${located.length===1?'':'s'} shown${filtered?' (filtered)':''}`+
+  /* Crew homes alongside the subs: a filled diamond in the market colour rather
+     than a round sub pin, so the two never read as the same kind of thing. */
+  crewMapLayer.clearLayers();
+  const showCrews=document.getElementById('mapShowCrews');
+  const crews=(!showCrews||showCrews.checked) ? CREWS.filter(c=>geoOk(c.lat,c.lng)) : [];
+  for(const c of crews){
+    const nm=`${c.name||''} ${c.last||''}`.trim()||c.code||'Crew';
+    const off=!isActive(c);
+    const icon=L.divIcon({className:'',iconSize:[16,16],iconAnchor:[8,8],
+      html:`<div style="width:12px;height:12px;margin:2px;transform:rotate(45deg);background:${off?'#9aa4b2':REGION_COLOR};
+        border:2px solid #fff;box-shadow:0 0 0 1px ${off?'#9aa4b2':REGION_COLOR},0 1px 3px rgba(0,0,0,.4)"></div>`});
+    L.marker([+c.lat,+c.lng],{icon,zIndexOffset:900})
+      .bindTooltip(`<b>${esc(nm)}</b>${c.code?' · '+esc(c.code):''}${off?'<br><i>not working</i>':''}`,{direction:'top',offset:[0,-8]})
+      .addTo(crewMapLayer);
+  }
+  const showSubs=document.getElementById('mapShowSubs');
+  if(showSubs && !showSubs.checked) subsMapLayer.clearLayers();
+  const {keep,out}=fitCluster(showSubs&&!showSubs.checked ? crews.map(c=>[+c.lat,+c.lng]) : pts, 500);
+  if(subsMapInfoEl) subsMapInfoEl.innerHTML=
+    `${(!showSubs||showSubs.checked)?`<b>${located.length}</b> sub${located.length===1?'':'s'}`:'subs hidden'}`+
+    `${crews.length?` &middot; <b>${crews.length}</b> crew home${crews.length===1?'':'s'}`:''}`+
+    `${filtered?' (filtered)':''}`+
     `${missing?` · <span style="color:#d97706">${missing} without coordinates</span>`:''}`+
     `${bad.length?` · <span style="color:#dc2626">${bad.length} with impossible coordinates</span>`:''}`+
     `${out.length?` · <span style="color:#d97706">${out.length} far outside ${REGION}</span>`:''}`;
@@ -3989,67 +3825,15 @@ document.getElementById('thBtn').onclick=()=>{
   showToast(allOn ? `${keys.length} job(s) back to full on-site time`
                   : `${keys.length} job(s) marked TH — on-site time divided by ${div}`);
 };
-document.getElementById('crewMapBtn').onclick=()=>{
-  if(!jobsHeader){ showToast('Load a Sage export first'); return; }
-  toggleCrewMap();
-};
-document.getElementById('cmCap').oninput=()=>renderCrewMap(false);
 const depotEl=document.getElementById('depotToggle');
 depotEl.checked=DEPOTS_ON;
 depotEl.onchange=()=>{ DEPOTS_ON=depotEl.checked; save(K_DEPOTS,DEPOTS_ON);
   showToast(DEPOTS_ON?'Crew depots ON — each working crew is appended as a Depot row'
-                     :'Crew depots OFF — orders only, for territories'); };
-document.getElementById('cmReset').onclick=()=>{
-  if(!Object.keys(PREVIEW_STARTS).length){ showToast('Nothing moved'); return; }
-  PREVIEW_STARTS={}; renderCrewMap(true); showToast('Back to each crew’s saved start');
-};
-/* A dragged pin is a what-if until it's asked for. Saving keeps it for good as
-   another named start on that crew — their real home stays in the dropdown, so
-   the manager can flip back to it any morning. Each pin is named on its own:
-   moving three crews usually means three different places, not one. */
-document.getElementById('cmSave').onclick=()=>{
-  const moved=Object.keys(PREVIEW_STARTS);
-  if(!moved.length){ showToast('Drag a start first'); return; }
-  const root=document.getElementById('modalRoot2');
-  const rows=moved.map(k=>{
-    const c=CREWS[+k]||{}, p=PREVIEW_STARTS[k];
-    const nm=`${c.name||''} ${c.last||''}`.trim()||c.code||`Crew ${+k+1}`;
-    const away=isFinite(+c.lat)?haversineMi(+c.lat,+c.lng,p.lat,p.lng):null;
-    return `<tr data-row="${k}">
-      <td style="white-space:nowrap">${esc(nm)}<div class="muted" style="font-size:11px">
-        ${p.lat.toFixed(5)}, ${p.lng.toFixed(5)}${away!=null?` · ${away.toFixed(1)} mi from home`:''}</div></td>
-      <td><input type="text" data-nm="${k}" value="Map start" placeholder="name this start"
-        style="width:100%;padding:6px 8px;font:inherit;font-size:13px;border:1px solid var(--line);border-radius:8px"></td>
-      <td style="width:34px"><input type="checkbox" data-keep="${k}" checked title="save this one"></td></tr>`;
-  }).join('');
-  root.innerHTML=`<div class="backdrop"><div class="modal" style="max-width:620px">
-    <div class="mh"><h3>Keep these starts</h3>
-      <div class="muted" style="font-size:12px;margin-top:4px">Each one is added to that crew as a named start location.
-        Their real home stays where it is &mdash; switch between them from the crew list any time.</div></div>
-    <div class="mb"><div class="tablewrap"><table>
-      <thead><tr><th>Crew</th><th>Name this start</th><th></th></tr></thead><tbody>${rows}</tbody></table></div></div>
-    <div class="mf"><button id="ssCancel">Cancel</button><button class="primary" id="ssOk">Save</button></div></div></div>`;
-  root.querySelector('#ssCancel').onclick=()=>root.innerHTML='';
-  root.querySelector('#ssOk').onclick=()=>{
-    let n=0, skipped=0;
-    for(const k of moved){
-      if(!root.querySelector(`[data-keep="${k}"]`).checked){ skipped++; continue; }
-      const label=root.querySelector(`[data-nm="${k}"]`).value.trim();
-      if(!label){ skipped++; continue; }
-      const c=CREWS[+k]; if(!c) continue;
-      const p=PREVIEW_STARTS[k], L=crewLocs(c);
-      const hit=L.findIndex(x=>norm(x.label)===norm(label));
-      if(hit>=0){ L[hit].lat=p.lat; L[hit].lng=p.lng; crewSetLoc(c,hit); }
-      else { L.push({label,lat:p.lat,lng:p.lng}); crewSetLoc(c,L.length-1); }
-      delete PREVIEW_STARTS[k];
-      n++;
-    }
-    persistCrews(); renderCrews(); root.innerHTML=''; renderCrewMap(false);
-    showToast(n?`Kept ${n} start location${n===1?'':'s'}${skipped?` · ${skipped} left as a what-if`:''}`
-               :'Nothing saved');
-  };
-};
+                     :'Crew depots OFF — the upload will carry no start locations','warn'); };
 document.getElementById('subsMapBtn').onclick=()=>toggleSubsMap();
+['mapShowSubs','mapShowCrews'].forEach(id=>{
+  const el=document.getElementById(id); if(el) el.onchange=()=>renderSubsMap(false);
+});
 document.getElementById('subsFoldBtn').onclick=()=>{
   SUBS_FOLDERS=!SUBS_FOLDERS; save(K_SUBFOLD,SUBS_FOLDERS);
   document.getElementById('subsFoldBtn').classList.toggle('primary',SUBS_FOLDERS);
@@ -4137,7 +3921,7 @@ window.addEventListener('error',ev=>{
 });
 
 // init
-const APP_VERSION='v27 · 2026-09-14';
+const APP_VERSION='v28 · 2026-09-14';
 document.getElementById('appVer').textContent=APP_VERSION+' · '+REGION;
 // region switcher: each region is its own workspace; a click stores the choice
 // and reloads so the whole app boots into that region's storage

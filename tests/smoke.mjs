@@ -38,25 +38,40 @@ check('file01 loads into the trim table',st.rows===20&&st.trim,`${st.rows} rows`
 st=await page.evaluate(()=>{
   const res=buildFile02(parseCSV(window.__csv).filter(r=>r.some(c=>String(c).trim()!=='')));
   const h=res.rows[0].map(x=>String(x).trim());
-  return {header:h.join('|'),rows:res.rows.length-1,matched:res.matched,
-    flagged:res.rows.slice(1).filter(r=>String(r[h.indexOf('Priority')]||'')!=='').length};
+  return {header:h.join('|'),rows:res.rows.length-1,matched:res.matched,depots:res.depots,outName:res.outName,
+    flagged:res.rows.slice(1).filter(r=>String(r[h.indexOf('Priority')]||'')!==''&&String(r[h.indexOf('Depot')]||'')!=='1').length};
 });
-check('export builds every geocoded job',st.rows===20&&st.matched===20,`${st.rows} rows`);
+check('export builds every geocoded job plus depots',st.rows===31&&st.matched===20,`${st.rows} rows`);
 check('one rush flagged, rest blank',st.flagged===1,`${st.flagged} flagged`);
-check('columns are lean',st.header==='Alias|Latitude|Longitude|Svc Job Num|Scheduled For|Priority|Color',st.header);
+check('columns are lean, no Scheduled For',st.header==='Alias|Latitude|Longitude|Svc Job Num|Priority|Color|Depot',st.header);
+check('crews ship as depots by default',st.depots===11,`${st.depots} depots`);
+check('the upload is named plainly',/^Route4Me upload \d{4}-\d{2}-\d{2}\.csv$/.test(st.outName),st.outName);
 
-// crew map
-await page.click('#crewMapBtn'); await page.waitForTimeout(1000);
-st=await page.evaluate(()=>{let j=0,p=0;if(crewJobLayer)crewJobLayer.eachLayer(()=>j++);if(crewPinLayer)crewPinLayer.eachLayer(()=>p++);
-  return {j,p,summary:document.getElementById('cmSummary').textContent};});
-check('crew map draws jobs and starts',st.j>0&&st.p>0,`${st.j} job dots, ${st.p} starts`);
-await page.click('#crewMapBtn'); await page.waitForTimeout(200);
-
-// subs map
+// subs map, now carrying crew homes too
 await page.click('[data-tab="subs"]'); await page.click('#subsMapBtn'); await page.waitForTimeout(1000);
-st=await page.evaluate(()=>{let m=0;if(subsMapLayer)subsMapLayer.eachLayer(()=>m++);
-  return {m,zoom:subsMapInstance.getZoom(),span:+(subsMapInstance.getBounds().getNorth()-subsMapInstance.getBounds().getSouth()).toFixed(1)};});
+const layers=()=>page.evaluate(()=>{let m=0,c=0;
+  if(subsMapLayer)subsMapLayer.eachLayer(()=>m++); if(crewMapLayer)crewMapLayer.eachLayer(()=>c++);
+  return {m,c,zoom:subsMapInstance.getZoom(),
+    span:+(subsMapInstance.getBounds().getNorth()-subsMapInstance.getBounds().getSouth()).toFixed(1),
+    info:subsMapInfoEl.textContent.replace(/\s+/g,' ').trim(),
+    togglesShown:!document.querySelector('.mapToggle').classList.contains('hide')};});
+st=await layers();
 check('subs map opens on Florida',st.m>90&&st.zoom>=6&&st.span<12,`${st.m} pins, zoom ${st.zoom}, ${st.span}° tall`);
+check('crew homes are drawn as their own markers',st.c===11,`${st.c} crew markers`);
+check('the info box counts both',/subs/.test(st.info)&&/crew home/.test(st.info),st.info);
+check('the layer toggles appear with the map',st.togglesShown);
+
+await page.uncheck('#mapShowCrews'); await page.waitForTimeout(300);
+st=await layers();
+check('crews can be switched off',st.c===0&&st.m>90,`${st.m} subs, ${st.c} crews`);
+await page.check('#mapShowCrews'); await page.uncheck('#mapShowSubs'); await page.waitForTimeout(300);
+st=await layers();
+check('subs can be switched off',st.m===0&&st.c===11,`${st.m} subs, ${st.c} crews`);
+check('and the map still fits the crews',st.span<12,`${st.span}° tall`);
+await page.check('#mapShowSubs'); await page.waitForTimeout(200);
+await page.click('#subsMapBtn'); await page.waitForTimeout(200);
+st=await page.evaluate(()=>document.querySelector('.mapToggle').classList.contains('hide'));
+check('the toggles hide again with the map',st===true);
 
 // settings
 await page.click('[data-tab="settings"]'); await page.waitForTimeout(300);
@@ -78,7 +93,8 @@ st=await page.evaluate(()=>{
   file03Text=f03; setFile01(window.__csv,'file01.csv',true); runReverse();
   return {summary:document.getElementById('bringSummary').textContent};
 });
-check('file03 splices back to a Sage import',/rows/.test(st.summary),st.summary.slice(0,110));
+check('file03 splices back to a Sage import',/rows/.test(st.summary),st.summary.slice(0,120));
+check('the Sage file is named for what it is',/Sage assignment import \d{4}-\d{2}-\d{2}\.csv/.test(st.summary),st.summary.slice(-45));
 
 check('no page errors anywhere in the flow',errs.length===0,errs.join(' | ').slice(0,200));
 await page.evaluate(()=>{localStorage.clear();localStorage.setItem('r4m_region_v1','FL');});
