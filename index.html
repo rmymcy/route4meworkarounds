@@ -922,13 +922,14 @@ svg.leaflet-image-layer.leaflet-interactive path {
         <div id="drop3" class="drop r4m">
           <div class="dicon">&#11014;</div>
           <div class="dtitle">R4Me</div>
-          <div id="file3Name" class="dname"></div>
-          <div id="f1status" class="muted" style="font-size:11.5px;margin-top:10px"></div>
           <button id="pick3Btn" class="hide"></button>
           <input type="file" id="file3" accept=".csv,text/csv" multiple class="hide">
         </div>
+        <!-- what is loaded, and what it is paired with, sit under the box -->
+        <div id="file3Name" class="dname" style="margin-top:10px;text-align:center"></div>
+        <div id="f1status" class="muted" style="font-size:11.5px;margin-top:6px;text-align:center"></div>
         <div id="bringResult" class="row hide" style="margin-top:14px;align-items:center;gap:10px;flex-wrap:wrap">
-          <button class="primary" id="download4Btn">Download Sage import (file04)</button>
+          <button class="primary" id="download4Btn">Download Sage import</button>
           <button id="cffBtn" class="hide">CFF</button>
           <span class="muted" id="bringSummary" style="font-size:12.5px"></span>
         </div>
@@ -1690,7 +1691,7 @@ function renderTasks(){
       <td class="muted" style="font-size:12px">${n?`${n} job${n===1?'':'s'} today`:'—'}</td>
       <td><button class="icon-btn danger" data-tdel="${ti}" title="remove task">&times;</button></td>
     </tr>`;
-  }).join('') || '<tr><td colspan="4" class="muted">No tasks yet — add one below, or import a file01 and use the list above.</td></tr>';
+  }).join('') || '<tr><td colspan="4" class="muted">No tasks yet — add one below, or load a Sage export and use the list above.</td></tr>';
 
   const un=unmappedTasks(TASKMX);
   const unJobs=un.reduce((a,b)=>a+b[1],0);
@@ -2036,8 +2037,8 @@ function loadFile01ForReview(text,name,restoring){
   } else if(hasProcCol||hasHomeRows){
     warn.className='';
     warn.innerHTML=`<div class="unmatched"><span class="badge warn">Heads up</span>
-      This looks like an <b>already-processed file (file02)</b>${hasProcCol?' &mdash; it has a Depot/Latitude/Longitude column':''}${hasHomeRows?' &mdash; it contains crew <b>&ldquo;Home&rdquo;</b> depot rows':''}.
-      For a clean run, drop the <b>raw Sage export (file01)</b> instead. You can still continue if this was intentional.</div>`;
+      This looks like a <b>file this tool already built</b>${hasProcCol?' &mdash; it has a Depot/Latitude/Longitude column':''}${hasHomeRows?' &mdash; it contains crew <b>&ldquo;Home&rdquo;</b> depot rows':''}.
+      For a clean run, drop the <b>raw Sage export</b> instead. You can still continue if this was intentional.</div>`;
   } else { warn.className='hide'; warn.innerHTML=''; }
   document.getElementById('trimCard').classList.remove('hide');
   document.getElementById('welcomeCard').classList.add('hide'); // work has started — get out of the way
@@ -2286,23 +2287,23 @@ function openCffModal(res){
 }
 
 function reverseConvert(f03Text, f01Text){
-  if(!f01Text) throw new Error('Load the original Sage export (file01) first.');
+  if(!f01Text) throw new Error('Load the original Sage export first.');
   const f1 = parseCSV(f01Text).filter(r=>r.some(c=>String(c).trim()!==''));  // handles quoted or padded
-  if(f1.length<2) throw new Error('file01 looks empty.');
+  if(f1.length<2) throw new Error('The Sage export looks empty.');
   const f1cols = f1[0].map(s=>String(s).trim());
   const ix = n=>f1cols.findIndex(c=>norm(c)===norm(n));
   const iSvc=ix('Svc Job Num'), iSid=ix('Servicer Id'), iStat=ix('Status Code');
-  if(iSvc<0||iSid<0||iStat<0) throw new Error('file01 is missing Svc Job Num / Servicer Id / Status Code columns.');
+  if(iSvc<0||iSid<0||iStat<0) throw new Error('The Sage export is missing Svc Job Num / Servicer Id / Status Code columns.');
   const iMj=ix('Master Job'), iSb=ix('Subdiv Name'), iTk=ix('Description Of Problem'), iSd=ix('Schedule_Date');
 
   // file03 -> assignment map by Svc Job Num
   const f3rows=parseCSV(f03Text).filter(r=>r.some(c=>String(c).trim()!==''));
-  if(!f3rows.length) throw new Error('file03 is empty.');
+  if(!f3rows.length) throw new Error('The Route4Me export is empty.');
   const f3h=f3rows[0].map(s=>norm(s));
   const j3=(...names)=>{ for(const n of names){ const k=f3h.indexOf(norm(n)); if(k>=0) return k; } return -1; };
   const c3svc=j3('Svc Job Num'), c3f=j3('User_First_Name','User First Name'), c3l=j3('User_Last_Name','User Last Name');
-  if(c3svc<0) throw new Error('file03 has no "Svc Job Num" column.');
-  if(c3f<0||c3l<0) throw new Error('file03 has no User_First_Name / User_Last_Name columns.');
+  if(c3svc<0) throw new Error('The Route4Me export has no "Svc Job Num" column.');
+  if(c3f<0||c3l<0) throw new Error('The Route4Me export has no User_First_Name / User_Last_Name columns.');
   const assign=new Map();
   for(let r=1;r<f3rows.length;r++){
     const svc=String(f3rows[r][c3svc]||'').trim();
@@ -2380,7 +2381,7 @@ function toMMDDYY(s){
 }
 
 function runReverse(){
-  if(!file03Text){ showToast('Drop the Route4Me export (file03) first'); return; }
+  if(!file03Text){ showToast('Drop the Route4Me routes first'); return; }
   let res;
   try{ res=reverseConvert(file03Text, file01Text); }
   catch(e){ showToast(e.message); return; }
@@ -2389,9 +2390,9 @@ function runReverse(){
   logMsg(`file04 built: ${s.kept} rows (${s.out2if} OUT→IF, ${s.feKept+s.fvKept} FE/FV), ${s.dropCFF} CFF dropped, ${s.dropUnassigned} unassigned dropped`);
   if(res.routedMissing>0){
     const frac=res.routedTotal?Math.round(100*res.routedMissing/res.routedTotal):0;
-    showToast(`file01 doesn't match: ${res.routedMissing} of ${res.routedTotal} routed jobs (${frac}%) aren't in the loaded file01 — load the right Sage export`,'err');
+    showToast(`The Sage export doesn't match: ${res.routedMissing} of ${res.routedTotal} routed jobs (${frac}%) aren't in it — load the right one`,'err');
   }
-  if(res.unknownCrew.size) showToast(`Unknown crew in file03: ${[...res.unknownCrew.keys()].join(', ')} — Servicer Id left unchanged`,'warn');
+  if(res.unknownCrew.size) showToast(`Unknown crew in the Route4Me export: ${[...res.unknownCrew.keys()].join(', ')} — Servicer Id left unchanged`,'warn');
   if(res.missingCode.size) showToast(`Crews missing a Servicer Id code: ${[...res.missingCode.keys()].join(', ')} (Settings → Crews)`,'warn');
   const row=document.getElementById('bringResult');
   row.classList.remove('hide');
@@ -3274,7 +3275,7 @@ function saveLastImport(v){
         return;
       }
       if(!save(K_LASTIMPORT,v))
-        showToast('Browser storage is full — this file01 works now but won’t be remembered after closing','warn');
+        showToast('Browser storage is full — this file works now but won’t be remembered after closing','warn');
     });
 }
 
@@ -4057,7 +4058,7 @@ window.addEventListener('error',ev=>{
 });
 
 // init
-const APP_VERSION='v31 · 2026-09-14';
+const APP_VERSION='v32 · 2026-09-14';
 document.getElementById('appVer').textContent=APP_VERSION+' · '+REGION;
 // region switcher: each region is its own workspace; a click stores the choice
 // and reloads so the whole app boots into that region's storage
