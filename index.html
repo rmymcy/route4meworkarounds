@@ -712,8 +712,8 @@ svg.leaflet-image-layer.leaflet-interactive path {
     transition:.15s;background:#fbfcfe;cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:210px}
   .drop:hover{border-style:solid}
   .drop .dicon{font-size:30px;line-height:1;margin-bottom:10px}
-  .drop .dtitle{font-size:15.5px;font-weight:700;color:var(--ink)}
-  .drop .dsub{font-size:12.5px;margin-top:5px}
+  /* One word per box — the colour says which system it is */
+  .drop .dtitle{font-size:19px;font-weight:800;letter-spacing:.06em;color:var(--ink)}
   .drop .dname{font-size:12px;margin-top:12px;font-weight:600}
   /* Sage green going out */
   .drop.sage{border-color:#86efac;background:#f2fdf5;color:#3f6f52}
@@ -721,7 +721,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
   .drop.sage:hover,.drop.sage.drag{border-color:#16a34a;background:#e7fbee}
   /* Route4Me blue coming back, their orange on the mark */
   .drop.r4m{border-color:#bfdbfe;background:#f1f6ff;color:#4a6285}
-  .drop.r4m .dicon{color:#ea580c}
+  .drop.r4m .dicon,.drop.r4m .dtitle{color:#ea580c}
   .drop.r4m:hover,.drop.r4m.drag{border-color:#2563eb;background:#e6efff}
   .drop b{color:var(--ink)}
   input[type=text],input[type=number],input[type=search]{font:inherit;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:#fff;color:var(--ink);width:100%}
@@ -912,8 +912,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
       <div class="card">
         <div id="drop" class="drop sage">
           <div class="dicon">&#11015;</div>
-          <div class="dtitle">Drop the Sage export</div>
-          <div class="dsub">or click to choose a file</div>
+          <div class="dtitle">SAGE</div>
           <div id="fileName" class="dname"></div>
           <button id="pickBtn" class="hide"></button>
           <input type="file" id="file" accept=".csv,text/csv" class="hide">
@@ -922,8 +921,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
       <div class="card" style="margin-bottom:18px">
         <div id="drop3" class="drop r4m">
           <div class="dicon">&#11014;</div>
-          <div class="dtitle">Drop the Route4Me routes</div>
-          <div class="dsub">several merge into one &middot; or click to choose</div>
+          <div class="dtitle">R4Me</div>
           <div id="file3Name" class="dname"></div>
           <div id="f1status" class="muted" style="font-size:11.5px;margin-top:10px"></div>
           <button id="pick3Btn" class="hide"></button>
@@ -969,9 +967,6 @@ svg.leaflet-image-layer.leaflet-interactive path {
   <section id="tab-settings" class="hide">
     <div class="card">
       <h2>Tasks</h2>
-      <div class="muted" style="font-size:12.5px;margin:-4px 0 12px">One row per Sage task name, exactly as it is spelled in
-        <b>Description Of Problem</b>, with how long that work takes on site. That becomes Route4Me&rsquo;s service time,
-        so its day adds up to something realistic.</div>
       <div id="taskUnmapped"></div>
       <div class="tablewrap" style="max-height:56vh">
         <table id="taskTable">
@@ -1002,9 +997,6 @@ svg.leaflet-image-layer.leaflet-interactive path {
     </div>
     <div class="card">
       <h2>Priority</h2>
-      <div class="note" style="margin:-4px 0 14px">Route4Me reads priority as a <b>sequencing</b> instruction: if every stop carries one,
-        it orders the day by priority instead of by drive time. So only jobs Sage flags with a letter get a priority &mdash;
-        everything else ships blank, and Route4Me is left free to optimise the route. Flagged jobs are pinned red.</div>
       <div class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.06em;font-weight:600;margin-bottom:7px">Letter codes in Sage&rsquo;s Priority column</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center" id="codeWrap"></div>
       <div class="row" style="margin-top:10px;gap:8px;align-items:center">
@@ -1012,7 +1004,6 @@ svg.leaflet-image-layer.leaflet-interactive path {
         <input type="number" id="pmCodeV" placeholder="priority" style="width:110px">
         <button class="small" id="pmCodeAdd">Add code</button>
       </div>
-      <div class="muted" style="font-size:11.5px;margin-top:8px">A letter Sage sends that has no code here is left blank and reported in the Log.</div>
     </div>
     <div class="card">
       <h2>Import</h2>
@@ -1366,6 +1357,11 @@ function subKeyOf(name, section){ return subKeyForms(name,section)[0]; }
 /* returns {sub, how} or {sub:null, how}. With a section, the fuller name is tried
    first and the bare name is the fallback, so a library with no section detail
    still matches exactly as it did before. */
+/* Shortest name we will treat as a Sage truncation rather than a real name.
+   Below this, short shared prefixes ("Star Lake"/"Star Lake Estates") would
+   collapse into each other. The import warning quotes this same number. */
+const TRUNC_MIN=19;
+
 function matchSub(value, idx, section){
   const bare=String(value==null?'':value).trim();
   if(section===undefined) return matchSubName(value, idx);
@@ -1381,12 +1377,11 @@ function matchSubName(value, idx){
   if(idx.byAlias.has(n)) return {sub:idx.byAlias.get(n),how:'alias'};
   if(ONE_TIME_SUB.has(n)){ const s=SUBS.find(x=>norm(x.name)===norm(ONE_TIME_SUB.get(n))); if(s) return {sub:s,how:'onetime'}; }
   // Truncation-aware: Sage cuts "Subdiv Name" at a fixed column width, so a long
-  // library name arrives shortened. If the raw name is >=19 chars and the unique
-  // prefix of exactly one longer name (or alias), treat it as a truncation and
-  // SAVE it as an alias so the next import hits the exact fast path. The 19-char
-  // floor stops short shared prefixes ("Star Lake"/"Star Lake Estates") collapsing.
+  // library name arrives shortened. If the raw name is >=TRUNC_MIN chars and the
+  // unique prefix of exactly one longer name (or alias), treat it as a truncation
+  // and SAVE it as an alias so the next import hits the exact fast path.
   const raw0=String(value==null?'':value).trim();
-  if(raw0.length>=19){
+  if(raw0.length>=TRUNC_MIN){
     const nameHits=SUBS.filter(s=>norm(s.name).length>n.length && norm(s.name).startsWith(n));
     if(nameHits.length===1) return {sub:_saveTruncAlias(nameHits[0],raw0),how:'prefix'};
     if(nameHits.length===0){
@@ -1490,8 +1485,8 @@ const JOB_RUSH=new Set();
 
 /* Sage reports are fixed-width: a column too narrow for its title clips the
    title too, so "Subdiv Name" arrives as "Subdi". Fall back to a unique
-   prefix so the file still opens — clippedCol() then says so out loud,
-   because a clipped header means clipped data underneath it. */
+   prefix so the file still opens. A clipped title costs nothing by itself —
+   what matters is whether the *values* were cut, which clipWidth() measures. */
 function findCol(header, name){
   const target=norm(name);
   for(let i=0;i<header.length;i++) if(norm(header[i])===target) return i;
@@ -1505,10 +1500,25 @@ function findCol(header, name){
   }
   return hit;
 }
-/* True when `name` only matched because its header was cut short. */
+/* True when `name` only matched because its header was cut short. Harmless on
+   its own — "Description Of Probl" still finds the right column. */
 function clippedCol(header, name){
   const i=findCol(header,name);
   return i>=0 && norm(header[i])!==norm(name);
+}
+/* The width at which column `i` is losing text, or 0 if it isn't.
+   A fixed-width export pads every cell to the same width; a value that reaches
+   that width edge to edge was cut to fit. A value that stops short of it is
+   whole, however short the title above it got. An ordinary unpadded CSV has
+   ragged widths and never trips this. */
+function clipWidth(header, rows, i){
+  if(i<0) return 0;
+  const cell=r=>String((r.cells?r.cells[i]:r[i])??'');
+  const raw=[String(header[i]??''), ...rows.map(cell)].filter(v=>v!=='');
+  if(raw.length<2) return 0;
+  const w=raw[0].length;
+  if(!raw.every(v=>v.length===w)) return 0;          // not padded: nothing to measure
+  return rows.some(r=>cell(r).trim().length===w) ? w : 0;
 }
 
 function convert(text, sourceName){
@@ -1691,21 +1701,18 @@ function renderTasks(){
         <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:7px">
           ${un.map(([t,n])=>`<button class="small" data-tadd="${esc(t)}">+ ${esc(t)} <b>&times;${n}</b></button>`).join('')}
         </div></div>`
-    : `<div class="muted" style="font-size:12px;margin-bottom:12px">&#10003; Every task in the loaded file has a row.</div>`;
+    : '';   // nothing to say when every task is already set up
 
   const bb=document.getElementById('buildBody');
   if(bb){
     const bcount=buildTypeCounts();
-    const sample=TASKMX.tasks.find(t=>t.svc!==''&&isFinite(+t.svc));
     bb.innerHTML=TASKMX.builds.map((b,bi)=>{
       const n=bcount.get(b.code)||0;
-      const eg=sample?`${Math.max(1,Math.round(+sample.svc*(+b.pct||100)/100))} min`:'';
       return `<tr>
         <td style="font-family:ui-monospace,Menlo,Consolas,monospace;font-weight:700">${b.code?esc(b.code):'<span class="muted">(blank)</span>'}</td>
         <td>${esc(b.label)}</td>
         <td><input type="number" min="1" max="100" data-bpct="${bi}" value="${esc(b.pct)}"
-              style="width:70px;padding:4px 2px;font-size:12.5px;text-align:center;border:1px solid var(--line);border-radius:6px">
-            ${eg?`<span class="muted" style="font-size:11px;margin-left:6px">${eg}</span>`:''}</td>
+              style="width:70px;padding:4px 2px;font-size:12.5px;text-align:center;border:1px solid var(--line);border-radius:6px"></td>
         <td class="muted" style="font-size:12px">${n?`${n} job${n===1?'':'s'}`:'—'}</td>
       </tr>`;
     }).join('');
@@ -1999,19 +2006,27 @@ function loadFile01ForReview(text,name,restoring){
   const hasHomeRows = iAddrW>=0 && jobsRows.some(r=>/\bhome$/i.test(String(r.cells[iAddrW]||'').trim()));
   const warn=document.getElementById('trimWarn');
   const missingCore=['Address 1','Subdiv Name'].filter(n=>findCol(jobsHeader,n)<0);
-  // A clipped header means clipped values: "Poitras Place" arrives as "Poitr"
-  // and nothing in the library can match it. Say that, rather than calling the
-  // whole file malformed.
-  const clipped=['Subdiv Name','Address 1','Description Of Problem','Svc Job Num']
-    .filter(n=>clippedCol(jobsHeader,n));
-  if(clipped.length){
-    const iSubW=findCol(jobsHeader,'Subdiv Name');
-    const widest=iSubW<0?0:jobsRows.reduce((m,r)=>Math.max(m,String(r.cells[iSubW]||'').trim().length),0);
+  // Columns the Sage report is cutting text off in. A clipped *title* is not
+  // itself a problem — findCol resolves it — so this measures the values.
+  const clipped=['Subdiv Name','Address 1','Description Of Problem']
+    .map(n=>{
+      const i=findCol(jobsHeader,n), w=clipWidth(jobsHeader,jobsRows,i);
+      return w ? {n,w,hit:jobsRows.filter(r=>String(r.cells[i]||'').trim().length===w).length} : null;
+    }).filter(Boolean);
+  const subClip=clipped.find(c=>c.n==='Subdiv Name');
+  const list=clipped.map(c=>`<b>${esc(c.n)}</b> at ${c.w} characters (${c.hit} row${c.hit===1?'':'s'})`).join(', ');
+  if(subClip && subClip.w<TRUNC_MIN){
+    // too short for the prefix aliases to work — matching cannot recover
     warn.className='';
-    warn.innerHTML=`<div class="unmatched" style="border-left-color:var(--err);background:var(--err-bg)"><span class="badge err">Sage cut these columns short</span>
-      <div style="margin-top:6px"><b>${clipped.map(esc).join('</b>, <b>')}</b> ${clipped.length>1?'arrive':'arrives'} with the title itself truncated (${esc(clipped.map(n=>String(jobsHeader[findCol(jobsHeader,n)]).trim()).join(', '))}),
-      which means the values underneath are cut to the same width${widest?` &mdash; the longest subdivision in this file is <b>${widest}</b> characters`:''}.
-      Nothing will match the library. Widen ${clipped.length>1?'those columns':'that column'} in the Sage report and export again.</div></div>`;
+    warn.innerHTML=`<div class="unmatched" style="border-left-color:var(--err);background:var(--err-bg)"><span class="badge err">Sage is cutting subdivision names short</span>
+      <div style="margin-top:6px">The <b>Subdiv Name</b> column in this report is only <b>${subClip.w}</b> characters wide, so names arrive cut (${esc(String(jobsRows[0]&&jobsRows[0].cells[findCol(jobsHeader,'Subdiv Name')]||'').trim())}&hellip;).
+      Nothing can match the library at that width. Widen the column in the Sage report and export again.</div></div>`;
+  } else if(clipped.length){
+    warn.className='';
+    warn.innerHTML=`<div class="unmatched"><span class="badge warn">Heads up</span>
+      This report pads to fixed widths and some values reach the edge: ${list}.
+      ${subClip?`Subdivision names that long still resolve &mdash; they are matched on their first ${TRUNC_MIN} characters &mdash; and a`:'A'}ddresses are labels only, so the run is fine.
+      Widen ${clipped.length>1?'those columns':'that column'} in the Sage report if you want the full text.</div>`;
   } else if(missingCore.length || jobsCols.length<4){
     // malformed / wrong file: parsed, but barely any expected Sage columns matched
     warn.className='';
@@ -4042,7 +4057,7 @@ window.addEventListener('error',ev=>{
 });
 
 // init
-const APP_VERSION='v30 · 2026-09-14';
+const APP_VERSION='v31 · 2026-09-14';
 document.getElementById('appVer').textContent=APP_VERSION+' · '+REGION;
 // region switcher: each region is its own workspace; a click stores the choice
 // and reloads so the whole app boots into that region's storage
