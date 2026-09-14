@@ -934,6 +934,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
         <button class="small danger" id="removeSelBtn">Remove selected (0)</button>
         <button class="small" id="restoreBtn">Restore removed</button>
         <button class="small" id="winBtn" title="give the selected jobs a time of day they have to happen in">&#9200; Time window&hellip;</button>
+        <button class="small" id="thBtn" title="mark the selected jobs as townhomes — attached units take less time on site">TH</button>
         <span class="muted grow" id="trimCount"></span>
         <label class="muted" style="font-size:12px;display:flex;align-items:center;gap:6px" title="Adds a &ldquo;Scheduled For&rdquo; column with this date on every job — Route4Me auto-schedules the orders for that day. Clear it to leave the column out. Sage's own Schedule_Date is untouched.">
           Schedule for <input type="date" id="schedFor" style="padding:5px 8px;font:inherit;font-size:12.5px;border:1px solid var(--line);border-radius:8px"></label>
@@ -1006,6 +1007,11 @@ svg.leaflet-image-layer.leaflet-interactive path {
         <input type="text" id="taskNew" placeholder="Add a task name&hellip;" style="flex:1;min-width:200px">
         <button class="primary small" id="taskAdd">Add</button>
         <button class="small" id="taskReset" style="margin-left:auto">Reset to standard</button>
+      </div>
+      <div class="row" style="margin-top:12px;padding-top:12px;border-top:1px solid var(--line);gap:8px;align-items:center;flex-wrap:wrap">
+        <label class="muted" style="font-size:12.5px;display:flex;align-items:center;gap:7px">Townhomes take
+          <input type="number" id="thDiv" min="1" step="0.1" style="width:80px;text-align:center"> &times; less time on site</label>
+        <span class="muted" style="font-size:11.5px" id="thHint"></span>
       </div>
       <p class="muted" id="taskCount" style="margin:10px 2px 0"></p>
     </div>
@@ -1482,6 +1488,10 @@ const SVC_H='Service Time', WINF_H='Time Window Start', WINT_H='Time Window End'
 /* Time windows belong to a single order, not to a kind of work, so they live
    here keyed by Svc Job Num rather than on the task. */
 const JOB_WINDOWS=new Map();
+/* Townhomes are attached, so a crew doing ten of them spends far less time per
+   unit than on ten detached lots. Marked per job — the same subdivision can hold
+   both — and keyed by Svc Job Num like the windows. */
+const JOB_TH=new Set();
 
 function findCol(header, name){
   const target=norm(name);
@@ -1536,6 +1546,7 @@ function openColsModal(){
    kind of work, and are set per job on the Dispatch page. Stored per market. */
 const K_PRIOMX=RK+'priomatrix_v2';       // families — superseded, read once to migrate
 const K_TASKMX=RK+'taskmatrix_v1';
+const TH_DEFAULT='2.5';                  // townhome jobs take this much less time on site
 const TASK_DEFAULT=[
   {name:'ENV W\\ELEV STK', svc:''},
   {name:'GRADE STAKING',   svc:''},
@@ -1565,9 +1576,11 @@ function loadTaskMx(){
   if(!m||!Array.isArray(m.tasks)) m={tasks:JSON.parse(JSON.stringify(TASK_DEFAULT)),codes:{...CODE_DEFAULT}};
   m.tasks=m.tasks.map(normTask).filter(t=>t.name);
   if(!m.codes||typeof m.codes!=='object') m.codes={...CODE_DEFAULT};
+  if(!(+m.th>0)) m.th=TH_DEFAULT;
   return m;
 }
-function saveTaskMx(m){ return save(K_TASKMX,{tasks:(m.tasks||[]).map(normTask).filter(t=>t.name), codes:m.codes||{...CODE_DEFAULT}}); }
+function saveTaskMx(m){ return save(K_TASKMX,{tasks:(m.tasks||[]).map(normTask).filter(t=>t.name),
+    codes:m.codes||{...CODE_DEFAULT}, th:(+m.th>0?String(m.th):TH_DEFAULT)}); }
 function taskIndex(m){ const by={}; for(const t of m.tasks) by[norm(t.name)]=t; return by; }
 function prioMxActive(mx){ return Object.keys(mx.codes||{}).length>0; }
 function loadPrioMx(){ return loadTaskMx(); }   // old name, current data
@@ -1634,6 +1647,14 @@ function renderTasks(){
         </div></div>`
     : `<div class="muted" style="font-size:12px;margin-bottom:12px">&#10003; Every task in the loaded file has a row.</div>`;
 
+  const dv=document.getElementById('thDiv');
+  if(dv){
+    dv.value=TASKMX.th||TH_DEFAULT;
+    const sample=TASKMX.tasks.find(t=>t.svc!==''&&isFinite(+t.svc));
+    document.getElementById('thHint').textContent = sample
+      ? `${sample.name} ${sample.svc} min \u2192 ${Math.max(1,Math.round(+sample.svc/(+dv.value||1)))} min when marked TH`
+      : 'Set an on-site time above to see the effect.';
+  }
   document.getElementById('taskCount').textContent=
     `${TASKMX.tasks.length} task${TASKMX.tasks.length===1?'':'s'}`+
     (jobsHeader?` · ${[...counts.keys()].length} in the loaded file`:'');
@@ -1688,6 +1709,12 @@ function wireTaskSettings(){
   };
   document.getElementById('taskAdd').onclick=addTask;
   document.getElementById('taskNew').addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); addTask(); } });
+  const dv=document.getElementById('thDiv');
+  dv.onchange=()=>{ const v=+dv.value;
+    if(!(v>0)){ showToast('That has to be a number above zero','err'); dv.value=TASKMX.th||TH_DEFAULT; return; }
+    commitTasks(); TASKMX.th=String(v); saveTaskMx(TASKMX); renderTasks();
+    showToast(`Townhome jobs now take ${v}\u00d7 less time on site`);
+  };
   document.getElementById('taskReset').onclick=()=>{
     if(!confirm('Reset every task to the standard AllPoints setup? Your service times and priority numbers will be lost.')) return;
     TASKMX={tasks:JSON.parse(JSON.stringify(TASK_DEFAULT)),codes:{R:'1'}};
@@ -1772,7 +1799,14 @@ function buildFile02(rows){
   /* On-site minutes and a per-order time window only earn a column when
      something actually carries them, so a market that uses neither still gets
      the same lean upload it had before. */
-  const svcOf=cells=>{ const t=TASK_BY[norm(cells[iTask])]; return t&&t.svc!==''&&isFinite(+t.svc)?String(+t.svc):''; };
+  const thDiv=+(PRIOMX.th||TH_DEFAULT)||1;
+  const svcOf=cells=>{
+    const t=TASK_BY[norm(cells[iTask])];
+    if(!t||t.svc===''||!isFinite(+t.svc)) return '';
+    const key=iSvc>=0?String(cells[iSvc]||'').trim():'';
+    const th=key&&JOB_TH.has(key);
+    return String(th ? Math.max(1,Math.round(+t.svc/thDiv)) : +t.svc);
+  };
   const svcOn = iTask>=0 && (PRIOMX.tasks||[]).some(t=>t.svc!==''&&isFinite(+t.svc));
   const winOf=cells=>{ const k=iSvc>=0?String(cells[iSvc]||'').trim():''; return k?JOB_WINDOWS.get(k)||null:null; };
   const winOn = iSvc>=0 && JOB_WINDOWS.size>0;
@@ -1802,7 +1836,7 @@ function buildFile02(rows){
 
   const unmatched=new Map(); // erpName -> {count}
   const noCoords=new Map();  // matched sub name -> count (sub exists but has no lat/long yet)
-  let matched=0, jobs=0, windowed=0;
+  let matched=0, jobs=0, windowed=0, thN=0;
   for(let r=1;r<rows.length;r++){
     const cells=rows[r];
     jobs++;
@@ -1829,6 +1863,7 @@ function buildFile02(rows){
     }
     const w=winOn?winOf(cells):null;
     if(w) windowed++;
+    if(svcOn && iSvc>=0 && JOB_TH.has(String(cells[iSvc]||'').trim())) thN++;
     out.push(reshape(cells, lat, lng, schedFor, aliasFor(cells, m.sub?m.sub.name:''), prio, color, '',
       {svc:svcOn?svcOf(cells):'', winf:w?w.from:'', wint:w?w.to:''}));
   }
@@ -1858,7 +1893,7 @@ function buildFile02(rows){
 
   const outName=`Route4Me Upload ${REGION} ${todayStamp()}.csv`;
   return {rows:out, outName, schedFor, prioOn, prioApplied, rushN, unmatched, noCoords, matched, jobs,
-          depots, depotsMoved, prioSkipped, svcOn, winOn, windowed};
+          depots, depotsMoved, prioSkipped, svcOn, winOn, windowed, thN, thDiv};
 }
 function isActive(cw){ return cw.active!==false; } // default on unless explicitly false
 function todayStamp(){ const d=new Date(); const p=n=>String(n).padStart(2,'0'); return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`; }
@@ -1880,7 +1915,7 @@ const K_TRIM=RK+'trimstate_v1';   // which rows were trimmed, so a refresh keeps
 const K_UITAB=RK+'uitab_v1';     // which page (Dispatch/Settings) was open
 function persistTrim(){ try{ save(K_TRIM,{name:file01Name||'',
     removed:jobsRows.filter(r=>r.removed).map(r=>r.id),
-    wins:[...JOB_WINDOWS.entries()]}); }catch(e){} }
+    wins:[...JOB_WINDOWS.entries()], th:[...JOB_TH]}); }catch(e){} }
 function loadFile01ForReview(text,name,restoring){
   let rows;
   try{ rows=parseCSV(text).filter(r=>r.some(c=>String(c).trim()!=='')); }
@@ -1891,6 +1926,7 @@ function loadFile01ForReview(text,name,restoring){
   jobsSel=new Set(); jobsAnchor=null; jobsSort={i:null,dir:1};
   ONE_TIME_SUB.clear();   // one-time sub matches are per-import-run
   JOB_WINDOWS.clear();    // and so are time windows — they belong to today's orders
+  JOB_TH.clear();
   // fresh default per import: tomorrow (Route4Me auto-schedules orders for this day)
   const sfEl=document.getElementById('schedFor');
   if(sfEl){ const d=new Date(Date.now()+86400000), p=n=>String(n).padStart(2,'0');
@@ -1954,6 +1990,11 @@ function scanUnmatchedAtImport(){
   if(!unmatched.size) return;
   openUnmatchedModal(unmatched, scanUnmatchedAtImport, {mode:'import'});
 }
+function isTH(r){
+  if(!jobsHeader||!JOB_TH.size) return false;
+  const i=findCol(jobsHeader,'Svc Job Num'); if(i<0) return false;
+  return JOB_TH.has(String(r.cells[i]||'').trim());
+}
 function jobsView(){
   const v=jobsRows.filter(r=>!r.removed);
   if(jobsSort.i!=null){
@@ -1980,15 +2021,17 @@ function renderJobs(){
   const body=document.getElementById('jobsBody');
   body.innerHTML=view.map(r=>`<tr data-id="${r.id}" class="${jobsSel.has(r.id)?'sel':''}">`+
     `<td><input type="checkbox" data-cb="${r.id}" ${jobsSel.has(r.id)?'checked':''}></td>`+
-    jobsCols.map(c=>`<td>${jobCellHtml(c.name, String(r.cells[c.i]==null?'':r.cells[c.i]).trim())}</td>`).join('')+`</tr>`).join('');
+    jobsCols.map((c,ci)=>`<td>${jobCellHtml(c.name, String(r.cells[c.i]==null?'':r.cells[c.i]).trim())}`+
+      (ci===0&&isTH(r)?' <span class="badge sec" title="townhome — reduced on-site time">TH</span>':'')+
+      `</td>`).join('')+`</tr>`).join('');
   const removed=jobsRows.filter(r=>r.removed).length;
   const live=jobsRows.filter(r=>!r.removed);
   const iStatC=findCol(jobsHeader,'Status Code'), iPrioC=findCol(jobsHeader,'Priority');
   const cffN=iStatC>=0?live.filter(r=>norm(r.cells[iStatC])==='cff').length:0;
   const rushRe=/^[a-z]{1,3}$/i;
   const rushN=iPrioC>=0?live.filter(r=>rushRe.test(String(r.cells[iPrioC]||'').trim())).length:0;
-  const winN=JOB_WINDOWS.size;
-  document.getElementById('trimCount').textContent=`${view.length} jobs${removed?` · ${removed} removed`:''}${cffN?` · ${cffN} CFF`:''}${rushN?` · ${rushN} rush`:''}${winN?` · ${winN} windowed`:''} · ${jobsSel.size} selected`;
+  const winN=JOB_WINDOWS.size, thCount=live.filter(isTH).length;
+  document.getElementById('trimCount').textContent=`${view.length} jobs${removed?` · ${removed} removed`:''}${cffN?` · ${cffN} CFF`:''}${rushN?` · ${rushN} rush`:''}${winN?` · ${winN} windowed`:''}${thCount?` · ${thCount} TH`:''} · ${jobsSel.size} selected`;
   document.getElementById('removeSelBtn').textContent=`Remove selected (${jobsSel.size})`;
   const all=document.getElementById('jobsAll');
   if(all) all.checked = view.length>0 && view.every(r=>jobsSel.has(r.id));
@@ -2225,7 +2268,8 @@ function finishExport(res){
   if(res.unmatched.size) logMsg(`Dropped — unresolved subs: ${[...res.unmatched].map(([k,i])=>`${k||'(blank)'} ×${i.count}`).join(', ')}`,'warn');
   if(res.noCoords.size) logMsg(`Dropped — no coordinates yet: ${[...res.noCoords].map(([k,n])=>`${k} ×${n}`).join(', ')}`,'warn');
   if(res.depots) logMsg(`Depot rows appended: ${res.depots} crew start(s)${res.depotsMoved?`, ${res.depotsMoved} moved on the crew map`:''}`);
-  if(res.svcOn) logMsg(`On-site minutes written as "${SVC_H}" from the task settings`);
+  if(res.svcOn) logMsg(`On-site minutes written as "${SVC_H}" from the task settings`+
+    (res.thN?`; ${res.thN} townhome job(s) divided by ${res.thDiv}`:''));
   if(res.winOn) logMsg(`${res.windowed} job(s) carry a time window ("${WINF_H}"/"${WINT_H}")`);
   downloadFile02Res(res);
   const dropped=res.jobs-res.matched;
@@ -3578,6 +3622,7 @@ document.getElementById('genBtn').onclick=()=>{
       loadFile01ForReview(stash.text, stash.name||'file01.csv', true);
       const ts=load(K_TRIM,null);
       if(ts && Array.isArray(ts.wins)){ JOB_WINDOWS.clear(); for(const [k,v] of ts.wins) if(k&&v&&v.from&&v.to) JOB_WINDOWS.set(k,v); }
+      if(ts && Array.isArray(ts.th)){ JOB_TH.clear(); for(const k of ts.th) if(k) JOB_TH.add(String(k)); }
       if(ts && ts.name===(stash.name||'file01.csv') && Array.isArray(ts.removed) && ts.removed.length){
         const ids=new Set(ts.removed);
         jobsRows.forEach(r=>{ if(ids.has(r.id)) r.removed=true; });
@@ -3928,6 +3973,22 @@ function openWindowModal(){
   };
 }
 document.getElementById('winBtn').onclick=openWindowModal;
+/* Toggle, not set: if every selected job is already a townhome the button
+   clears them, so one control does both directions. */
+document.getElementById('thBtn').onclick=()=>{
+  if(!jobsHeader){ showToast('Load a Sage export first'); return; }
+  const iSvc=findCol(jobsHeader,'Svc Job Num');
+  if(iSvc<0){ showToast('This file has no Svc Job Num column','err'); return; }
+  const keys=jobsRows.filter(r=>!r.removed && jobsSel.has(r.id))
+    .map(r=>String(r.cells[iSvc]||'').trim()).filter(Boolean);
+  if(!keys.length){ showToast('Select the townhome jobs first'); return; }
+  const allOn=keys.every(k=>JOB_TH.has(k));
+  keys.forEach(k=>allOn?JOB_TH.delete(k):JOB_TH.add(k));
+  persistTrim(); renderJobs();
+  const div=+(loadTaskMx().th||TH_DEFAULT)||1;
+  showToast(allOn ? `${keys.length} job(s) back to full on-site time`
+                  : `${keys.length} job(s) marked TH — on-site time divided by ${div}`);
+};
 document.getElementById('crewMapBtn').onclick=()=>{
   if(!jobsHeader){ showToast('Load a Sage export first'); return; }
   toggleCrewMap();
@@ -4076,7 +4137,7 @@ window.addEventListener('error',ev=>{
 });
 
 // init
-const APP_VERSION='v26 · 2026-09-14';
+const APP_VERSION='v27 · 2026-09-14';
 document.getElementById('appVer').textContent=APP_VERSION+' · '+REGION;
 // region switcher: each region is its own workspace; a click stores the choice
 // and reloads so the whole app boots into that region's storage
