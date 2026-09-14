@@ -1488,10 +1488,27 @@ const JOB_TH=new Set();
    Same store shape as the townhome marks, keyed by Svc Job Num. */
 const JOB_RUSH=new Set();
 
+/* Sage reports are fixed-width: a column too narrow for its title clips the
+   title too, so "Subdiv Name" arrives as "Subdi". Fall back to a unique
+   prefix so the file still opens — clippedCol() then says so out loud,
+   because a clipped header means clipped data underneath it. */
 function findCol(header, name){
   const target=norm(name);
   for(let i=0;i<header.length;i++) if(norm(header[i])===target) return i;
-  return -1;
+  let hit=-1;
+  for(let i=0;i<header.length;i++){
+    const h=norm(header[i]);
+    if(h.length>=4 && h.length<target.length && target.startsWith(h)){
+      if(hit>=0) return -1;   // ambiguous — two headers could be this column
+      hit=i;
+    }
+  }
+  return hit;
+}
+/* True when `name` only matched because its header was cut short. */
+function clippedCol(header, name){
+  const i=findCol(header,name);
+  return i>=0 && norm(header[i])!==norm(name);
 }
 
 function convert(text, sourceName){
@@ -1982,7 +1999,20 @@ function loadFile01ForReview(text,name,restoring){
   const hasHomeRows = iAddrW>=0 && jobsRows.some(r=>/\bhome$/i.test(String(r.cells[iAddrW]||'').trim()));
   const warn=document.getElementById('trimWarn');
   const missingCore=['Address 1','Subdiv Name'].filter(n=>findCol(jobsHeader,n)<0);
-  if(missingCore.length || jobsCols.length<4){
+  // A clipped header means clipped values: "Poitras Place" arrives as "Poitr"
+  // and nothing in the library can match it. Say that, rather than calling the
+  // whole file malformed.
+  const clipped=['Subdiv Name','Address 1','Description Of Problem','Svc Job Num']
+    .filter(n=>clippedCol(jobsHeader,n));
+  if(clipped.length){
+    const iSubW=findCol(jobsHeader,'Subdiv Name');
+    const widest=iSubW<0?0:jobsRows.reduce((m,r)=>Math.max(m,String(r.cells[iSubW]||'').trim().length),0);
+    warn.className='';
+    warn.innerHTML=`<div class="unmatched" style="border-left-color:var(--err);background:var(--err-bg)"><span class="badge err">Sage cut these columns short</span>
+      <div style="margin-top:6px"><b>${clipped.map(esc).join('</b>, <b>')}</b> ${clipped.length>1?'arrive':'arrives'} with the title itself truncated (${esc(clipped.map(n=>String(jobsHeader[findCol(jobsHeader,n)]).trim()).join(', '))}),
+      which means the values underneath are cut to the same width${widest?` &mdash; the longest subdivision in this file is <b>${widest}</b> characters`:''}.
+      Nothing will match the library. Widen ${clipped.length>1?'those columns':'that column'} in the Sage report and export again.</div></div>`;
+  } else if(missingCore.length || jobsCols.length<4){
     // malformed / wrong file: parsed, but barely any expected Sage columns matched
     warn.className='';
     warn.innerHTML=`<div class="unmatched" style="border-left-color:var(--err);background:var(--err-bg)"><span class="badge err">This doesn&rsquo;t look like a Sage export</span>
@@ -4012,7 +4042,7 @@ window.addEventListener('error',ev=>{
 });
 
 // init
-const APP_VERSION='v29 · 2026-09-14';
+const APP_VERSION='v30 · 2026-09-14';
 document.getElementById('appVer').textContent=APP_VERSION+' · '+REGION;
 // region switcher: each region is its own workspace; a click stores the choice
 // and reloads so the whole app boots into that region's storage
