@@ -43,8 +43,8 @@ st=await page.evaluate(()=>{
 });
 check('export builds every geocoded job plus depots',st.rows===31&&st.matched===20,`${st.rows} rows`);
 check('one rush flagged, rest blank',st.flagged===1,`${st.flagged} flagged`);
-check('the dispatch date rides along as Scheduled For',
-  st.header==='Alias|Latitude|Longitude|Svc Job Num|Scheduled For|Priority|Color|Depot',st.header);
+check('the dispatch date adds no column to the upload',
+  st.header==='Alias|Latitude|Longitude|Svc Job Num|Priority|Color|Depot',st.header);
 check('crews ship as depots by default',st.depots===11,`${st.depots} depots`);
 check('the upload is named plainly',/^Route4Me upload \d{4}-\d{2}-\d{2}\.csv$/.test(st.outName),st.outName);
 

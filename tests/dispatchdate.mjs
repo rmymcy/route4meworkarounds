@@ -1,5 +1,6 @@
-/* The dispatch date stamps every job as "Scheduled For", leaves depot rows
-   blank, drops the column when cleared, and survives a refresh.
+/* The dispatch date is the day the crews go out. Schedule_Date is coloured
+   against it — red once a job is already due, amber for the day of and the day
+   after — and it adds nothing to the Route4Me upload.
    Run: node tests/dispatchdate.mjs                                          */
 import pw from '/opt/node22/lib/node_modules/playwright/index.js';
 const { chromium } = pw;
@@ -14,87 +15,95 @@ await page.evaluate(async()=>{localStorage.clear();localStorage.setItem('r4m_reg
   try{const db=await idbOpen();await new Promise(r=>{const t=db.transaction('kv','readwrite');t.objectStore('kv').clear();t.oncomplete=r;t.onerror=r;});}catch(e){}});
 await page.reload(); await page.waitForSelector('#regionBar .region.active'); await page.waitForTimeout(600);
 
+// Six jobs due across a working week: Mon 21 Sep 2026 through Mon 28 Sep.
 const HDR='"Received Date","Servicer Id","Status Code","Builder Name","Master Job","Svc Job Num","Address 1","Map Code","Subdiv Name","Section","Description Of Problem","Priority","Division","Title","Schedule_Date","BuildType"';
-await page.evaluate(h=>{
+const DUE=['09/21/26','09/22/26','09/23/26','09/24/26','09/25/26','09/28/26'];
+await page.evaluate(([h,due])=>{
   const sub=SUBS.find(s=>geoOk(s.lat,s.lng)).name;
-  window.__csv=[h,...[0,1,2].map(i=>
-    `"09/07/26","F1","OUT","B","1","${770000+i}","${100+i} Oak St","M","${sub}","","FORM SURVEY","","D","T","09/20/26",""`)].join('\n')+'\n';
+  window.__csv=[h,...due.map((d,i)=>
+    `"09/07/26","F1","OUT","B","1","${770000+i}","${100+i} Oak St","M","${sub}","","FORM SURVEY","","D","T","${d}",""`)].join('\n')+'\n';
   loadFile01ForReview(window.__csv,'file01.csv',false);
   const b=document.getElementById('umSkip'); if(b) b.click();
-},HDR);
+},[HDR,DUE]);
 await page.waitForTimeout(400);
 
-const out=()=>page.evaluate(()=>{
+/* What the Schedule_Date cell of each row looks like: late / soon / plain. */
+const shade=async iso=>{
+  await page.fill('#schedFor',iso); await page.waitForTimeout(250);
+  return page.evaluate(()=>{
+    const heads=[...document.querySelectorAll('#jobsTable thead th')].map(t=>t.textContent.trim());
+    const col=heads.indexOf('Schedule_Date');
+    return [...document.querySelectorAll('#jobsTable tbody tr')].map(tr=>{
+      const td=tr.children[col]; if(!td) return '?';
+      return td.querySelector('.due-late') ? 'late' : td.querySelector('.due-soon') ? 'soon' : 'plain';
+    }).join(' ');
+  });
+};
+
+// Dispatching Monday: only that day's work is urgent, the rest of the week is not.
+let st=await shade('2026-09-21');
+check('going out Monday, Monday is due and Tuesday is next',st==='soon soon plain plain plain plain',st);
+
+// Dispatching Wednesday: Monday and Tuesday have gone past.
+st=await shade('2026-09-23');
+check('going out Wednesday, the start of the week is already late',st==='late late soon soon plain plain',st);
+
+// Dispatching Friday: Monday is the next working day, so it counts as next up
+// even though the calendar gap is three days.
+st=await shade('2026-09-25');
+check('going out Friday, Monday is next up across the weekend',st==='late late late late soon soon',st);
+
+// From Thursday the same Monday is two working days out, so it is not urgent.
+st=await shade('2026-09-24');
+check('from Thursday that Monday is not urgent yet',st==='late late late soon soon plain',st);
+
+// Dispatching before any of it: nothing is urgent yet.
+st=await shade('2026-09-14');
+check('a batch going out early flags nothing',st==='plain plain plain plain plain plain',st);
+
+// The colouring follows the picker, not the machine clock.
+const today=await page.evaluate(()=>todayStamp());
+check('the reference date is the picker, not today',today==='2026-09-15',today);
+
+// ---- and none of it reaches Route4Me ----
+await page.fill('#schedFor','2026-09-23'); await page.waitForTimeout(200);
+st=await page.evaluate(()=>{
   const res=buildFile02(parseCSV(window.__csv).filter(r=>r.some(c=>String(c).trim()!=='')));
   const h=res.rows[0].map(x=>String(x).trim());
-  const iS=h.indexOf('Scheduled For'), iD=h.indexOf('Depot');
-  const body=res.rows.slice(1);
-  return { header:h.join('|'), has:iS>=0, schedFor:res.schedFor,
-    jobs:iS<0?[]:body.filter(r=>String(r[iD])!=='1').map(r=>String(r[iS])),
-    depots:iS<0?[]:body.filter(r=>String(r[iD])==='1').map(r=>String(r[iS])) };
+  return {header:h.join('|'), sched:'schedFor' in res};
 });
+check('the upload gains no Scheduled For column',!/Scheduled For/.test(st.header),st.header);
+check('the columns stay lean',st.header==='Alias|Latitude|Longitude|Svc Job Num|Depot',st.header);
 
-// 1. a fresh import defaults to tomorrow
-const val=await page.inputValue('#schedFor');
-const want=new Date(Date.now()+86400000).toISOString().slice(0,10);
-check('a fresh import defaults to tomorrow',val===want,`${val} vs ${want}`);
+// ---- the picker itself ----
+const tomorrow=await page.evaluate(()=>tomorrowStamp());
+const backdate=v=>page.evaluate(x=>{
+  const k='r4m_trimstate_v1', ts=JSON.parse(localStorage.getItem(k)||'{}');
+  ts.sched=x; ts.schedOn='2020-01-01';          // saved on some earlier day
+  localStorage.setItem(k,JSON.stringify(ts));
+},v);
 
-// 2. the date reaches every job, in the M/D/YYYY shape Route4Me reads
-await page.fill('#schedFor','2026-09-21'); await page.waitForTimeout(150);
-let st=await out();
-check('the column appears when a date is set',st.has,st.header);
-check('it sits right after Svc Job Num',/Svc Job Num\|Scheduled For/.test(st.header),st.header);
-check('every job carries the date',st.jobs.length===3&&st.jobs.every(v=>v==='9/21/2026'),st.jobs.join(','));
-check('the date is not zero-padded',st.schedFor==='9/21/2026',String(st.schedFor));
-check('depot rows are left blank',st.depots.length>0&&st.depots.every(v=>v===''),`${st.depots.length} depots`);
-
-// a two-digit month and day keep their own shape
-await page.fill('#schedFor','2026-12-25'); await page.waitForTimeout(150);
-st=await out();
-check('a December date reads back whole',st.jobs.every(v=>v==='12/25/2026'),st.jobs[0]);
-
-// 3. clearing it drops the column entirely
-await page.fill('#schedFor',''); await page.waitForTimeout(150);
-st=await out();
-check('clearing the date removes the column',!st.has,st.header);
-check('and nothing else shifts',st.header==='Alias|Latitude|Longitude|Svc Job Num|Depot',st.header);
-
-// 4. the chosen date survives a refresh, rather than resetting to tomorrow
 await page.fill('#schedFor','2026-10-05'); await page.waitForTimeout(250);
 await page.reload(); await page.waitForSelector('#regionBar .region.active'); await page.waitForTimeout(900);
 check('a refresh keeps the date that was chosen',await page.inputValue('#schedFor')==='2026-10-05',
   await page.inputValue('#schedFor'));
-
-// 5. a date left over from a previous day is stale -- it goes back to tomorrow
-const backdate=(sched)=>page.evaluate(v=>{
-  const k='r4m_trimstate_v1', ts=JSON.parse(localStorage.getItem(k)||'{}');
-  ts.sched=v; ts.schedOn='2020-01-01';          // saved on some earlier day
-  localStorage.setItem(k,JSON.stringify(ts));
-},sched);
-const tomorrow=await page.evaluate(()=>tomorrowStamp());
 
 await backdate('2026-10-05');
 await page.reload(); await page.waitForSelector('#regionBar .region.active'); await page.waitForTimeout(900);
 check('yesterday’s date does not carry over',await page.inputValue('#schedFor')===tomorrow,
   `${await page.inputValue('#schedFor')} vs ${tomorrow}`);
 
-await backdate('');   // even a deliberate blank is only a decision about that day
+await backdate('');
 await page.reload(); await page.waitForSelector('#regionBar .region.active'); await page.waitForTimeout(900);
 check('a new day starts at tomorrow even after a clear',await page.inputValue('#schedFor')===tomorrow,
   await page.inputValue('#schedFor'));
 
-// and it is genuinely tomorrow, not today
-const today=await page.evaluate(()=>todayStamp());
-check('tomorrow is one day past today',tomorrow!==today&&
-  (new Date(tomorrow+'T00:00')-new Date(today+'T00:00'))===86400000,`${today} -> ${tomorrow}`);
-
-// 6. it is per region, like everything else
 await page.evaluate(()=>localStorage.setItem('r4m_region_v1','HOU'));
 await page.reload(); await page.waitForSelector('#regionBar .region.active'); await page.waitForTimeout(700);
 check('another region does not inherit it',await page.inputValue('#schedFor')!=='2026-10-05',
   await page.inputValue('#schedFor'));
 
-// 7. "tomorrow" across the boundaries a naive +24h gets wrong.
+// ---- "tomorrow" across the boundaries a naive +24h gets wrong ----
 // Instants are pinned in UTC and read in US Eastern, where the tool is used.
 const east=await browser.newContext({timezoneId:'America/New_York'});
 await east.route('**/*.tile.openstreetmap.org/**',r=>r.abort());
@@ -109,8 +118,8 @@ for(const [now,want,label] of [
   ['2026-11-01T05:30Z','2026-11-02','the hour that happens twice'],
 ]){
   await ep.clock.setFixedTime(new Date(now));
-  const [today,tom]=await ep.evaluate(()=>[todayStamp(),tomorrowStamp()]);
-  check(`tomorrow is right on ${label}`,tom===want,`${today} -> ${tom}, want ${want}`);
+  const [t,tm]=await ep.evaluate(()=>[todayStamp(),tomorrowStamp()]);
+  check(`tomorrow is right on ${label}`,tm===want,`${t} -> ${tm}, want ${want}`);
 }
 
 await browser.close();
