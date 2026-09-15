@@ -942,6 +942,8 @@ svg.leaflet-image-layer.leaflet-interactive path {
         <button class="small" id="thBtn" title="mark the selected jobs as townhomes — attached units take less time on site">TH</button>
         <button class="small" id="rushBtn" title="flag the selected jobs at the same priority as a Sage rush letter">&#9873; Rush</button>
         <span class="muted grow" id="trimCount"></span>
+        <label class="muted" style="font-size:12px;display:flex;align-items:center;gap:6px" title="Stamps this date on every job as a &ldquo;Scheduled For&rdquo; column, so Route4Me schedules the orders for that day. Clear it to leave the column out. Sage's own Schedule_Date is untouched.">
+          Dispatch date <input type="date" id="schedFor" style="padding:5px 8px;font:inherit;font-size:12.5px;border:1px solid var(--line);border-radius:8px"></label>
         <button class="small" id="prioBtn" title="task service times and priority live in Settings → Tasks">Tasks&hellip;</button>
         <button class="small" id="colsBtn" title="choose which columns go to Route4Me (core: Alias, Lat, Long, Svc Job Num)">Columns&hellip;</button>
         <button class="primary" id="genBtn">Build Route4Me file &rarr;</button>
@@ -1814,6 +1816,14 @@ function buildFile02(rows){
   // be toggled on via "Columns…" (stored per region).
   const iSvc=findCol(header,'Svc Job Num');
   const skip=new Set([findCol(header,LAT_H),findCol(header,LNG_H),findCol(header,DEPOT_H)].filter(x=>x>=0));
+  // "Scheduled For": one uniform date on every job so Route4Me schedules the
+  // orders for that day (its own column — Sage's Schedule_Date is untouched).
+  const sfEl=document.getElementById('schedFor');
+  let schedFor=null;
+  if(sfEl && sfEl.value){
+    const m=sfEl.value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if(m) schedFor=`${+m[2]}/${+m[3]}/${m[1]}`;
+  }
   // Alias: task - subdivision - address, e.g. "FORM SURVEY - Laureate Park - 9620 Duflo Way".
   // Uses the full library sub name when matched (Sage's Subdiv Name is truncated).
   const iTask=findCol(header,'Description Of Problem');
@@ -1872,6 +1882,7 @@ function buildFile02(rows){
   plan.push({k:'lat'});
   plan.push({k:'lng'});
   addOrig(iSvc);
+  if(schedFor) plan.push({k:'sched'});
   if(svcOn) plan.push({k:'svc'});
   if(winOn){ plan.push({k:'winf'}); plan.push({k:'wint'}); }
   if(prioOn){ plan.push({k:'prio'}); plan.push({k:'color'}); }
@@ -1883,10 +1894,11 @@ function buildFile02(rows){
     return plan.map(s=> s.k==='orig' ? (cells[s.i]==null?'':cells[s.i])
       : s.k==='lat' ? latVal : s.k==='lng' ? lngVal : s.k==='alias' ? aliasVal
       : s.k==='prio' ? prioVal : s.k==='color' ? colorVal : s.k==='depot' ? (depotVal||'')
-      : s.k==='svc' ? (x.svc||'') : s.k==='winf' ? (x.winf||'') : s.k==='wint' ? (x.wint||'') : '');
+      : s.k==='svc' ? (x.svc||'') : s.k==='winf' ? (x.winf||'') : s.k==='wint' ? (x.wint||'')
+      : s.k==='sched' ? (x.sched||'') : '');   // depot rows pass no x, so they stay blank
   }
   out.push(reshape(header, LAT_H, LNG_H, 'Alias', 'Priority', 'Color', DEPOT_H,
-    {svc:SVC_H, winf:WINF_H, wint:WINT_H})); // header row
+    {svc:SVC_H, winf:WINF_H, wint:WINT_H, sched:'Scheduled For'})); // header row
 
   const unmatched=new Map(); // erpName -> {count}
   const noCoords=new Map();  // matched sub name -> count (sub exists but has no lat/long yet)
@@ -1923,7 +1935,7 @@ function buildFile02(rows){
       if(buildPct(PRIOMX,code)!==100) thN++;
     }
     out.push(reshape(cells, lat, lng, aliasFor(cells, m.sub?m.sub.name:''), prio, color, '',
-      {svc:svcOn?svcOf(cells):'', winf:w?w.from:'', wint:w?w.to:''}));
+      {svc:svcOn?svcOf(cells):'', winf:w?w.from:'', wint:w?w.to:'', sched:schedFor}));
   }
   // same task in the same sub -> identical aliases; number them so every stop
   // in Route4Me is distinguishable: "FORM SURVEY - Westview (1)", "(2)", ...
@@ -1950,7 +1962,7 @@ function buildFile02(rows){
   }
 
   const outName=`Route4Me upload ${todayStamp()}.csv`;
-  return {rows:out, outName, prioOn, prioApplied, rushN, unmatched, noCoords, matched, jobs,
+  return {rows:out, outName, schedFor, prioOn, prioApplied, rushN, unmatched, noCoords, matched, jobs,
           depots, prioSkipped, svcOn, winOn, windowed, thN};
 }
 function isActive(cw){ return cw.active!==false; } // default on unless explicitly false
@@ -1971,9 +1983,11 @@ function parseDateKey(s){
 }
 const K_TRIM=RK+'trimstate_v1';   // which rows were trimmed, so a refresh keeps the day's state
 const K_UITAB=RK+'uitab_v1';     // which page (Dispatch/Settings) was open
-function persistTrim(){ try{ save(K_TRIM,{name:file01Name||'',
+function persistTrim(){ try{ const sf=document.getElementById('schedFor');
+    save(K_TRIM,{name:file01Name||'',
     removed:jobsRows.filter(r=>r.removed).map(r=>r.id),
-    wins:[...JOB_WINDOWS.entries()], th:[...JOB_TH], rush:[...JOB_RUSH]}); }catch(e){} }
+    wins:[...JOB_WINDOWS.entries()], th:[...JOB_TH], rush:[...JOB_RUSH],
+    sched:sf?sf.value:''}); }catch(e){} }
 function loadFile01ForReview(text,name,restoring){
   let rows;
   try{ rows=parseCSV(text).filter(r=>r.some(c=>String(c).trim()!=='')); }
@@ -1985,6 +1999,11 @@ function loadFile01ForReview(text,name,restoring){
   ONE_TIME_SUB.clear();   // one-time sub matches are per-import-run
   JOB_WINDOWS.clear();    // and so are time windows — they belong to today's orders
   JOB_TH.clear(); JOB_RUSH.clear();
+  // fresh import defaults to tomorrow; a restore keeps whatever was chosen,
+  // which the trim state hands back just below
+  const sfEl=document.getElementById('schedFor');
+  if(sfEl && !restoring){ const d=new Date(Date.now()+86400000), p=n=>String(n).padStart(2,'0');
+    sfEl.value=`${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`; }
   // display columns (by header name; skipped silently if absent)
   const want=[['Svc Job Num','text'],['Received Date','date'],['Schedule_Date','date'],
     ['Description Of Problem','text'],['Status Code','text'],['Priority','text'],
@@ -2182,6 +2201,7 @@ function jobsClick(e){
 }
 function finishExport(res){
   if(!res.matched){ showToast('Nothing geocoded — nothing to export. Resolve subs or set coordinates first.','err'); return; }
+  if(res.schedFor) logMsg(`Scheduled For ${res.schedFor} stamped on every job`);
   if(res.prioOn){
     logMsg(`Priority: ${res.prioApplied} of ${res.matched} job(s) flagged by a Sage letter code; the rest left blank so Route4Me sequences by drive time`);
     if(res.prioSkipped && res.prioSkipped.size)
@@ -3570,6 +3590,7 @@ document.getElementById('genBtn').onclick=()=>{
       if(ts && Array.isArray(ts.wins)){ JOB_WINDOWS.clear(); for(const [k,v] of ts.wins) if(k&&v&&v.from&&v.to) JOB_WINDOWS.set(k,v); }
       if(ts && Array.isArray(ts.th)){ JOB_TH.clear(); for(const k of ts.th) if(k) JOB_TH.add(String(k)); }
       if(ts && Array.isArray(ts.rush)){ JOB_RUSH.clear(); for(const k of ts.rush) if(k) JOB_RUSH.add(String(k)); }
+      if(ts && typeof ts.sched==='string'){ const sf=document.getElementById('schedFor'); if(sf) sf.value=ts.sched; }
       if(ts && ts.name===(stash.name||'file01.csv') && Array.isArray(ts.removed) && ts.removed.length){
         const ids=new Set(ts.removed);
         jobsRows.forEach(r=>{ if(ids.has(r.id)) r.removed=true; });
@@ -3918,6 +3939,8 @@ function openWindowModal(){
   };
 }
 document.getElementById('winBtn').onclick=openWindowModal;
+// the chosen dispatch date is part of the day's state, so it survives a refresh
+document.getElementById('schedFor').onchange=persistTrim;
 /* Toggle, not set: if every selected job is already a townhome the button
    clears them, so one control does both directions. */
 document.getElementById('rushBtn').onclick=()=>{
@@ -4045,7 +4068,7 @@ window.addEventListener('error',ev=>{
 });
 
 // init
-const APP_VERSION='v33 · 2026-09-14';
+const APP_VERSION='v34 · 2026-09-15';
 document.getElementById('appVer').textContent=APP_VERSION+' · '+REGION;
 // region switcher: each region is its own workspace; a click stores the choice
 // and reloads so the whole app boots into that region's storage
