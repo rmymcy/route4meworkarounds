@@ -927,6 +927,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
         <div id="bringResult" class="row hide" style="margin-top:14px;align-items:center;gap:10px;flex-wrap:wrap">
           <button class="primary" id="download4Btn">Download Sage import</button>
           <button id="cffBtn" class="hide">CFF</button>
+          <button id="cffCopyBtn" class="hide" title="copy the CFF calc requests straight to the clipboard">&#128203; Copy CFF</button>
           <span class="muted" id="bringSummary" style="font-size:12.5px"></span>
         </div>
       </div>
@@ -2284,14 +2285,24 @@ function openCffModal(res){
     <button id="cffClose">Close</button><button class="primary" id="cffCopy">Copy</button></div></div></div>`;
   document.getElementById('cffClose').onclick=()=>root.innerHTML='';
   document.getElementById('cffDl').onclick=()=>download(`CFF Requests ${REGION} ${todayStamp()}.txt`, res.cffText, 'text/plain');
-  document.getElementById('cffCopy').onclick=async()=>{
-    try{ await navigator.clipboard.writeText(res.cffText); showToast('Copied'); }
-    catch(e){
-      const ta=document.createElement('textarea'); ta.value=res.cffText; document.body.appendChild(ta);
-      ta.select(); try{ document.execCommand('copy'); showToast('Copied'); }catch(e2){ showToast('Copy failed — select the text manually'); }
-      ta.remove();
-    }
-  };
+  document.getElementById('cffCopy').onclick=()=>copyText(res.cffText);
+}
+/* Clipboard, with the textarea fallback a file:// page sometimes needs.
+   Reports what happened either way — a silent copy is indistinguishable from
+   a failed one, and the next thing the user does is paste. */
+async function copyText(text, label){
+  const ok=`${label||'Copied'} — ${String(text).split('\n').filter(Boolean).length} lines`;
+  try{ await navigator.clipboard.writeText(text); showToast(ok); return true; }
+  catch(e){
+    const ta=document.createElement('textarea'); ta.value=text;
+    ta.style.position='fixed'; ta.style.opacity='0';       // keep the page from jumping
+    document.body.appendChild(ta); ta.select();
+    let done=false;
+    try{ done=document.execCommand('copy'); }catch(e2){}
+    ta.remove();
+    if(done) showToast(ok); else showToast('Copy failed — open CFF and copy from there','err');
+    return done;
+  }
 }
 
 function reverseConvert(f03Text, f01Text){
@@ -2404,10 +2415,13 @@ function runReverse(){
   if(res.missingCode.size) showToast(`Crews missing a Servicer Id code: ${[...res.missingCode.keys()].join(', ')} (Settings → Crews)`,'warn');
   const row=document.getElementById('bringResult');
   row.classList.remove('hide');
-  const cffBtn=document.getElementById('cffBtn');
-  if(res.cffReq.length){ cffBtn.classList.remove('hide'); cffBtn.onclick=()=>openCffModal(res);
+  const cffBtn=document.getElementById('cffBtn'), cffCopy=document.getElementById('cffCopyBtn');
+  if(res.cffReq.length){
+    cffBtn.classList.remove('hide'); cffBtn.onclick=()=>openCffModal(res);
+    // straight to the clipboard, for when there is nothing to check first
+    cffCopy.classList.remove('hide'); cffCopy.onclick=()=>copyText(res.cffText,'CFF copied');
     logMsg(`${res.cffReq.length} CFF calc request(s) across ${new Set(res.cffReq.map(x=>x.code)).size} crew(s)`); }
-  else cffBtn.classList.add('hide');
+  else { cffBtn.classList.add('hide'); cffCopy.classList.add('hide'); }
   document.getElementById('bringSummary').textContent=
     `${s.kept} rows · ${s.out2if} OUT→IF · ${s.dropCFF} CFF dropped · ${s.dropUnassigned} unassigned dropped · ${res.outName}`;
 }
@@ -4074,7 +4088,7 @@ window.addEventListener('error',ev=>{
 });
 
 // init
-const APP_VERSION='v36 · 2026-09-15';
+const APP_VERSION='v37 · 2026-09-15';
 document.getElementById('appVer').textContent=APP_VERSION+' · '+REGION;
 // region switcher: each region is its own workspace; a click stores the choice
 // and reloads so the whole app boots into that region's storage
