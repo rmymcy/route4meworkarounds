@@ -65,11 +65,53 @@ await page.reload(); await page.waitForSelector('#regionBar .region.active'); aw
 check('a refresh keeps the date that was chosen',await page.inputValue('#schedFor')==='2026-10-05',
   await page.inputValue('#schedFor'));
 
-// 5. it is per region, like everything else
+// 5. a date left over from a previous day is stale -- it goes back to tomorrow
+const backdate=(sched)=>page.evaluate(v=>{
+  const k='r4m_trimstate_v1', ts=JSON.parse(localStorage.getItem(k)||'{}');
+  ts.sched=v; ts.schedOn='2020-01-01';          // saved on some earlier day
+  localStorage.setItem(k,JSON.stringify(ts));
+},sched);
+const tomorrow=await page.evaluate(()=>tomorrowStamp());
+
+await backdate('2026-10-05');
+await page.reload(); await page.waitForSelector('#regionBar .region.active'); await page.waitForTimeout(900);
+check('yesterday’s date does not carry over',await page.inputValue('#schedFor')===tomorrow,
+  `${await page.inputValue('#schedFor')} vs ${tomorrow}`);
+
+await backdate('');   // even a deliberate blank is only a decision about that day
+await page.reload(); await page.waitForSelector('#regionBar .region.active'); await page.waitForTimeout(900);
+check('a new day starts at tomorrow even after a clear',await page.inputValue('#schedFor')===tomorrow,
+  await page.inputValue('#schedFor'));
+
+// and it is genuinely tomorrow, not today
+const today=await page.evaluate(()=>todayStamp());
+check('tomorrow is one day past today',tomorrow!==today&&
+  (new Date(tomorrow+'T00:00')-new Date(today+'T00:00'))===86400000,`${today} -> ${tomorrow}`);
+
+// 6. it is per region, like everything else
 await page.evaluate(()=>localStorage.setItem('r4m_region_v1','HOU'));
 await page.reload(); await page.waitForSelector('#regionBar .region.active'); await page.waitForTimeout(700);
 check('another region does not inherit it',await page.inputValue('#schedFor')!=='2026-10-05',
   await page.inputValue('#schedFor'));
+
+// 7. "tomorrow" across the boundaries a naive +24h gets wrong.
+// Instants are pinned in UTC and read in US Eastern, where the tool is used.
+const east=await browser.newContext({timezoneId:'America/New_York'});
+await east.route('**/*.tile.openstreetmap.org/**',r=>r.abort());
+const ep=await east.newPage();
+await ep.goto(URL); await ep.waitForSelector('#regionBar .region.active');
+for(const [now,want,label] of [
+  ['2026-09-15T13:00Z','2026-09-16','an ordinary day'],
+  ['2026-10-01T03:30Z','2026-10-01','the last night of a month'],
+  ['2026-12-31T23:00Z','2027-01-01','new year’s eve'],
+  ['2028-02-28T15:00Z','2028-02-29','the eve of a leap day'],
+  ['2026-03-08T04:00Z','2026-03-08','the night the clocks go forward'],
+  ['2026-11-01T05:30Z','2026-11-02','the hour that happens twice'],
+]){
+  await ep.clock.setFixedTime(new Date(now));
+  const [today,tom]=await ep.evaluate(()=>[todayStamp(),tomorrowStamp()]);
+  check(`tomorrow is right on ${label}`,tom===want,`${today} -> ${tom}, want ${want}`);
+}
 
 await browser.close();
 console.log(fails.length?`\n${fails.length} FAILED: `+fails.join(', '):'\nALL PASS');
