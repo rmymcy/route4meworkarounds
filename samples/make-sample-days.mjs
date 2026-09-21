@@ -158,6 +158,9 @@ const SUBS=SEED
     return {name:s.name, sage:AS_SAGE[s.name]||s.name, lat:s.lat, lng:s.lng,
       zone:zoneOf(s), streets, weight:WEIGHT[s.name]!==undefined?WEIGHT[s.name]:DEFAULT_WEIGHT};
   }).filter(Boolean);
+// Kept out of the samples at the dispatcher's request
+const OMIT=new Set(['Poitras N-4 West']);
+for(const s of SUBS) if(OMIT.has(s.name)) s.weight=0;
 const BY=Object.fromEntries(SUBS.map(s=>[s.name,s]));
 
 // map codes and divisions as the real exports show them
@@ -266,10 +269,19 @@ function share(subs, total, skip=new Set()){
   return out.filter(x=>x.n>0).map(x=>[x.s.name,x.n]);
 }
 // A day is written as how many jobs fall in each part of the region.
-const allocZones=(z,exclude=[])=>{
-  const skip=new Set(exclude);
-  return Object.entries(z).flatMap(([zone,total])=>
-    total>0 ? share(SUBS.filter(s=>s.zone===zone), total, skip) : []);
+/* `pin` forces a subdivision to an exact count; the rest of its zone shares out
+   what is left, so pinning never changes the day's total. */
+const allocZones=(z,exclude=[],pin={})=>{
+  const skip=new Set([...exclude,...Object.keys(pin)]);
+  const left={...z};
+  for(const [name,count] of Object.entries(pin)){
+    const zone=BY[name].zone;
+    left[zone]=(left[zone]||0)-count;
+    if(left[zone]<0) throw new Error(`pinned ${name} exceeds the ${zone} total`);
+  }
+  return [...Object.entries(pin),
+    ...Object.entries(left).flatMap(([zone,total])=>
+      total>0 ? share(SUBS.filter(s=>s.zone===zone), total, skip) : [])];
 };
 /* Subdivisions that sit on their own: a job in one is a leg of its own however
    the day is routed. Day 2 leaves them out, which is what makes it the tight
@@ -314,35 +326,46 @@ function toCSV(rows,{coords}){
 // ================= the three days =================
 const DISPATCH=new Date(2026,8,22);   // Tue 22 Sep 2026
 
-/* All three carry Hunter's Nassau block: St Marys is 150 miles from Orlando but
-   only 35 from his house, so it is his ordinary work -- and without it he has no
-   jobs and no reason to be a start. `core` gets eight more for the townhome. */
+/* Every day carries Hunter's Nassau block: St Marys is 150 miles from Orlando
+   but only 35 from his house, so it is his ordinary work -- and without it he
+   has no jobs and no reason to be a start. `core` gets eight more for the
+   townhome building, and Hills of Montverde is pinned so it shows up properly
+   instead of rounding away. */
 
 // Day 1 -- work at the edges: coast pockets too small for anyone's drive, plus
-// a Polk tail. Several separate work areas, two of them tiny.
+// a Polk tail. Several separate work areas, most of them tiny.
 const day1=buildDay(DISPATCH,
-  allocZones({core:22, metrosw:12, polk:8, north:6, farnorth:10, coast:4}), 'Parkview at Hamlin');
+  allocZones({core:18, metrosw:12, polk:8, north:10, farnorth:10, coast:4},
+    [], {'Hills of Montverde':3}), 'Parkview at Hamlin');
 
 // Day 2 -- same volume, nothing stranded. No coast, a thin Polk tail.
 const day2=buildDay(DISPATCH,
-  allocZones({core:26, metrosw:14, polk:6, north:8, farnorth:8, coast:0}, STANDALONE),
-  'Parkview at Hamlin');
+  allocZones({core:22, metrosw:14, polk:6, north:12, farnorth:8, coast:0},
+    STANDALONE, {'Hills of Montverde':2}), 'Parkview at Hamlin');
 
 // Day 3 -- eighteen jobs down in Polk: more than one crew can finish, less than
 // a full day for two, and forty miles from anyone's house.
 const day3=buildDay(DISPATCH,
-  allocZones({core:20, metrosw:10, polk:18, north:6, farnorth:9, coast:0}), 'Parkview at Hamlin');
+  allocZones({core:17, metrosw:9, polk:18, north:10, farnorth:9, coast:0},
+    [], {'Hills of Montverde':4}), 'Parkview at Hamlin');
+
+/* Day 4 -- a thin day. Same shape as the others at 50 jobs instead of 70, to
+   see what the optimizer does when six crews have well under a full load. */
+const day4=buildDay(DISPATCH,
+  allocZones({core:12, metrosw:8, polk:5, north:8, farnorth:7, coast:2},
+    [], {'Hills of Montverde':2}), 'Parkview at Hamlin');
 
 const out=process.argv[2]||'.';
 fs.mkdirSync(out,{recursive:true});
 console.log(`${SUBS.length} subdivisions usable from the library `+
   `(${SUBS.filter(s=>EXPORT_STREETS[s.name]).length} with streets from real exports, `+
   `${SUBS.filter(s=>!EXPORT_STREETS[s.name]).length} from the library address)\n`);
-for(const [label,rows] of [['1_spread',day1],['2_metro_only',day2],['3_southwest_cluster',day3]]){
-  fs.writeFileSync(`${out}/Sample_day_${label}.csv`, toCSV(rows,{coords:false}));
-  fs.writeFileSync(`${out}/Sample_day_${label}_with_coords.csv`, toCSV(rows,{coords:true}));
+for(const [n,label,rows] of [[1,'spread',day1],[2,'metro only',day2],
+                            [3,'southwest cluster',day3],[4,'light day',day4]]){
+  fs.writeFileSync(`${out}/SampleAddresses${n}.csv`, toCSV(rows,{coords:false}));
+  fs.writeFileSync(`${out}/SampleAddressesWCoords${n}.csv`, toCSV(rows,{coords:true}));
   const byCrew={}; for(const r of rows) byCrew[r.sid]=(byCrew[r.sid]||0)+1;
-  console.log(`${label.padEnd(20)} ${String(rows.length).padStart(3)} jobs · `+
+  console.log(`${n} ${label.padEnd(19)} ${String(rows.length).padStart(3)} jobs · `+
     `${new Set(rows.map(r=>r.sub)).size} subs · `+
     Object.entries(byCrew).sort().map(([k,v])=>`${k}:${v}`).join(' '));
 }
