@@ -70,6 +70,15 @@ const SUBS=[
     [['Manchester Path',590,6],['Harvard Court',451,4]]),
   S('Gum Lake Preserve',28.1237,-81.7304,'ORL6','08','polk',['PH1','PH2'],
     [['Amanatsu Avenue',3636,4]]),
+  /* The three below are the only ones whose streets did not come out of a Sage
+     export -- they were looked up from the builders' own listings, so spot-check
+     them before sending. Everything else is straight from a real file. */
+  S('Wynnstone',28.2026,-81.6451,'ORL6','08','polk',['PH1','PH2'],
+    [['Oaks River Street',5019,6]]),
+  S('Garden Hill at Providence',28.1908,-81.5477,'ORL6','08','polk',['PH1','PH2'],
+    [['Eastminister Road',4198,6],['Barnet Drive',5036,6]]),
+  S('Hamilton Bluff',28.0494,-81.6140,'ORL6','08','polk',['PH1'],
+    [['Redwood Lane',1508,6]]),
 
   // ---- far northeast coast: New Smyrna / Ormond ----
   S('Palms (Venetian Bay)',29.0264,-81.0231,'ORL2','08','coast',['PH6'],
@@ -107,6 +116,43 @@ const OWNER={'Laurel Preserve':'F19','The Villas at Camden Woods':'F19',
   'Edgewater Cross Prairie':'F65','Waters at Center Lake Ranch':'F65',
   'Esplanade at Center Lake Ranch':'F65','Laureate Park':'F76','Sandhill Preserve':'F76',
   'Palms (Venetian Bay)':'F19','Waterstone Subdivision':'F19','Gum Lake Preserve':'F51'};
+/* How often each subdivision actually turns up, counted across the real
+   exports (148 rows). Days are allocated in these proportions rather than by
+   hand, so Westview stays the giant it is and nothing else gets inflated.
+   The three SW additions carry a weight in line with their neighbours. */
+const WEIGHT={
+  'Westview':26, 'Edgewater Cross Prairie':15, 'Poitras N-4 West':12,
+  'Plat of Subdivision Survey(Esplanade at St. Marys':11, 'EA McKinnon Groves':10,
+  'Lochside':9, 'The Villas at Camden Woods':9, 'Woodland Ranch Estates':5,
+  'Crosswinds East':5, 'Liberty Trace':5, 'Crystal Lake Preserve':5,
+  'Waters at Center Lake Ranch':5, 'Laureate Park':4, 'Gum Lake Preserve':4,
+  'Leala Reserve':4, 'Esplanade at Center Lake Ranch':2,
+  'Meadow Pointe at Estates at Cherry Lake':2, 'Laurel Preserve':2,
+  'Palms (Venetian Bay)':2, 'Waterstone Subdivision':1,
+  'Cresswind at Lake Harris':1, 'Northshore':1,
+  'Wynnstone':5, 'Garden Hill at Providence':4, 'Hamilton Bluff':3,
+  // Parkview shows up in the real files almost entirely as townhome buildings
+  // (six of its seven rows were one BLDG), so its rows come from the building
+  // added on top rather than from here
+  'Parkview at Hamlin':0,
+};
+/* Largest-remainder allocation inside one zone, so the rounding lands on the
+   subdivisions with the biggest fractional claim rather than always the same few. */
+function share(subs, total){
+  const w=subs.map(s=>({s, w:WEIGHT[s.name]||0})).filter(x=>x.w>0);
+  const sum=w.reduce((a,b)=>a+b.w,0);
+  const out=w.map(x=>{const v=total*x.w/sum; return {s:x.s, n:Math.floor(v), r:v-Math.floor(v)};});
+  let left=total-out.reduce((a,b)=>a+b.n,0);
+  out.sort((a,b)=>b.r-a.r);
+  for(let i=0;left>0;i++,left--) out[i%out.length].n++;
+  return out.filter(x=>x.n>0).map(x=>[x.s.name,x.n]);
+}
+/* A day is written as how many jobs fall in each part of the region; within a
+   part the real proportions decide which subdivisions get them. */
+function allocZones(zoneTotals){
+  return Object.entries(zoneTotals).flatMap(([zone,total])=>
+    total>0 ? share(SUBS.filter(s=>s.zone===zone), total) : []);
+}
 const mi=(a,b,c,d)=>{const R=3958.8,p=Math.PI/180,q=(c-a)*p,r=(d-b)*p,
   x=Math.sin(q/2)**2+Math.cos(a*p)*Math.cos(c*p)*Math.sin(r/2)**2;
   return 2*R*Math.asin(Math.sqrt(x));};
@@ -196,50 +242,29 @@ const DISPATCH=new Date(2026,8,22);   // Tue 22 Sep 2026
 
 /* All three days carry Hunter's Nassau County block. St Marys is 150 miles
    from Orlando but only 35 from his house, so it is his ordinary work -- and
-   without it he has no jobs, and no reason to be a start. */
+   without it he has no jobs, and no reason to be a start.
+   Each day reserves eight rows for the townhome building at Parkview. */
 
-/* Day 1 -- work spread to the edges. A tail in Polk County and two coastal
-   subdivisions that sit between the two metros and belong to nobody cleanly.
-   This is the day that pulls the optimizer apart. */
-const day1=buildDay(DISPATCH,[
-  ['Edgewater Cross Prairie',5],['Poitras N-4 West',5],['Laureate Park',4],
-  ['Waters at Center Lake Ranch',4],['Esplanade at Center Lake Ranch',3],
-  ['EA McKinnon Groves',5],['Parkview at Hamlin',1],                    // 27 core
-  ['Westview',8],                                                       //  8 Poinciana
-  ['Lochside',4],['Leala Reserve',2],['Cresswind at Lake Harris',2],    //  8 north
-  ['Crosswinds East',2],['Liberty Trace',2],['Crystal Lake Preserve',2],
-  ['Gum Lake Preserve',2],                                              //  8 Polk
-  ['Palms (Venetian Bay)',3],['Waterstone Subdivision',2],              //  5 coast
-  ['Plat of Subdivision Survey(Esplanade at St. Marys',4],
-  ['The Villas at Camden Woods',2],['Northshore',1],['Laurel Preserve',1],
-],'Parkview at Hamlin');
+/* Zone totals per day; `core` gets eight more on top for the townhome building.
+   Westview alone is a sixth of all work and sits in Poinciana, so it is its own
+   zone -- otherwise it swamps the southwest on every day and Day 3 stops being
+   distinguishable. `polk` is the deep run: Haines City, Auburndale, Lake Alfred,
+   Winter Haven. That is the trip worth sending someone on. */
 
-/* Day 2 -- the same volume with nothing orphaned. Orlando metro plus Hunter's
-   own block; no Polk tail, no coast. The clean comparison. */
-const day2=buildDay(DISPATCH,[
-  ['Edgewater Cross Prairie',8],['Poitras N-4 West',7],['Laureate Park',6],
-  ['Waters at Center Lake Ranch',5],['Esplanade at Center Lake Ranch',4],
-  ['EA McKinnon Groves',5],['Parkview at Hamlin',2],                    // 37 core
-  ['Westview',7],                                                       //  7 Poinciana
-  ['Lochside',4],['Leala Reserve',2],
-  ['Meadow Pointe at Estates at Cherry Lake',2],                        //  8 north
-  ['Plat of Subdivision Survey(Esplanade at St. Marys',5],
-  ['The Villas at Camden Woods',3],['Northshore',1],['Laurel Preserve',1],
-],'Parkview at Hamlin');
+// Day 1 -- work at the edges: a coast pocket too small for anyone's drive,
+// plus a Polk tail. Five separate work areas, two of them tiny.
+const day1=buildDay(DISPATCH,
+  allocZones({core:22, metrosw:12, polk:8, north:6, farnorth:10, coast:4}), 'Parkview at Hamlin');
 
-/* Day 3 -- eighteen jobs down in Polk and Poinciana: more than one crew can
-   finish, less than a full day for two. The rest is ordinary work. */
-const day3=buildDay(DISPATCH,[
-  ['Westview',6],['Gum Lake Preserve',4],['Crystal Lake Preserve',4],
-  ['Woodland Ranch Estates',2],['Crosswinds East',2],                   // 18 southwest
-  ['Edgewater Cross Prairie',6],['Poitras N-4 West',5],['Laureate Park',5],
-  ['Waters at Center Lake Ranch',4],['Esplanade at Center Lake Ranch',3],
-  ['EA McKinnon Groves',4],['Parkview at Hamlin',1],                    // 28 core
-  ['Lochside',4],['Leala Reserve',2],
-  ['Meadow Pointe at Estates at Cherry Lake',3],                        //  9 north
-  ['Plat of Subdivision Survey(Esplanade at St. Marys',5],
-  ['The Villas at Camden Woods',3],['Northshore',1],['Laurel Preserve',1],
-],'Parkview at Hamlin');
+// Day 2 -- same volume, nothing stranded. No coast, a thin Polk tail, and
+// Hunter's block trimmed to what he can actually do.
+const day2=buildDay(DISPATCH,
+  allocZones({core:26, metrosw:14, polk:6, north:8, farnorth:8, coast:0}), 'Parkview at Hamlin');
+
+// Day 3 -- eighteen jobs down in Polk: more than one crew can finish, less than
+// a full day for two, and forty miles from anyone's house.
+const day3=buildDay(DISPATCH,
+  allocZones({core:20, metrosw:10, polk:18, north:6, farnorth:9, coast:0}), 'Parkview at Hamlin');
 
 import fs from 'node:fs';
 const out=process.argv[2]||'.';
