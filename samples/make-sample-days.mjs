@@ -305,11 +305,11 @@ function buildDay(dispatch, plan, tName){
 }
 
 // ---- CSV: quoted and padded, at the widths the report now uses ----
-const HEAD=['Received Date','Servicer Id','Status Code','Builder Name','Master Job','Svc Job Num',
-  'Address 1','Map Code','Subdiv Name','Section','Description Of Problem','Priority','Division',
-  'Title','Schedule_Date','BuildType'];
-const FIELD=['recv','sid','status','builder','master','job','addr','map','sub','section','task',
-  'prio','div','title','sched','build'];
+/* Only what is actually being sent. The rest of the Sage export -- dates,
+   Servicer Id, builder, job numbers, BuildType -- is still generated, so
+   widening this list again needs nothing but the column name. */
+const HEAD=['Address 1','Map Code','Subdiv Name','Section','Description Of Problem','Priority'];
+const FIELD=['addr','map','sub','section','task','prio'];
 const WIDTH={'Received Date':13,'Servicer Id':11,'Status Code':11,'Builder Name':12,
   'Master Job':15,'Svc Job Num':11,'Address 1':40,'Map Code':10,'Subdiv Name':52,
   'Section':15,'Description Of Problem':22,'Priority':8,'Division':8,'Title':5,
@@ -335,24 +335,24 @@ const DISPATCH=new Date(2026,8,22);   // Tue 22 Sep 2026
 // Day 1 -- work at the edges: coast pockets too small for anyone's drive, plus
 // a Polk tail. Several separate work areas, most of them tiny.
 const day1=buildDay(DISPATCH,
-  allocZones({core:18, metrosw:12, polk:8, north:10, farnorth:10, coast:4},
+  allocZones({core:22, metrosw:12, polk:8, north:6, farnorth:10, coast:4},
     [], {'Hills of Montverde':3}), 'Parkview at Hamlin');
 
 // Day 2 -- same volume, nothing stranded. No coast, a thin Polk tail.
 const day2=buildDay(DISPATCH,
-  allocZones({core:22, metrosw:14, polk:6, north:12, farnorth:8, coast:0},
+  allocZones({core:26, metrosw:14, polk:6, north:8, farnorth:8, coast:0},
     STANDALONE, {'Hills of Montverde':2}), 'Parkview at Hamlin');
 
 // Day 3 -- eighteen jobs down in Polk: more than one crew can finish, less than
 // a full day for two, and forty miles from anyone's house.
 const day3=buildDay(DISPATCH,
-  allocZones({core:17, metrosw:9, polk:18, north:10, farnorth:9, coast:0},
+  allocZones({core:20, metrosw:10, polk:18, north:6, farnorth:9, coast:0},
     [], {'Hills of Montverde':4}), 'Parkview at Hamlin');
 
 /* Day 4 -- a thin day. Same shape as the others at 50 jobs instead of 70, to
    see what the optimizer does when six crews have well under a full load. */
 const day4=buildDay(DISPATCH,
-  allocZones({core:12, metrosw:8, polk:5, north:8, farnorth:7, coast:2},
+  allocZones({core:14, metrosw:9, polk:5, north:5, farnorth:7, coast:2},
     [], {'Hills of Montverde':2}), 'Parkview at Hamlin');
 
 const out=process.argv[2]||'.';
